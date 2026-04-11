@@ -230,6 +230,8 @@ export default function App() {
   const [chatLog,setChatLog]       = useState([{role:"assistant",content:"Olá! 👋 Sou a *Finn*. Posso analisar gastos, registrar transações e gerar resumos mensais.\n\nO que precisam?"}]);
   const [chatIn,setChatIn]         = useState("");
   const [chatBusy,setChatBusy]     = useState(false);
+  const [isListening,setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
   // Form
   const [form,setForm]             = useState({descricao:"",value:"",cat:"Alimentação",type:"out",date:new Date().toISOString().slice(0,10)});
   const [importLog,setImportLog]   = useState([]);
@@ -373,6 +375,56 @@ export default function App() {
       await saveTx({date:form.date,descricao:form.descricao,cat:form.cat,value:isIncome?Math.abs(v):-Math.abs(v),type:isIncome?"in":"out",src:"manual"});
       setForm(f=>({...f,descricao:"",value:""}));
     }catch(e){console.error(e);}finally{setSavingTx(false);}
+  };
+
+  const toggleMic=()=>{
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { alert("Seu navegador não suporta reconhecimento de voz. Use o Chrome."); return; }
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const rec = new SpeechRecognition();
+    rec.lang = "pt-BR";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onstart = () => setIsListening(true);
+    rec.onend   = () => setIsListening(false);
+    rec.onerror = () => setIsListening(false);
+    rec.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      setChatIn(transcript);
+      // Auto-send after transcription
+      setTimeout(() => {
+        setChatIn("");
+        const history = [...chatLog, {role:"user", content:transcript}];
+        setChatLog(history);
+        setChatBusy(true);
+        const summary = filteredTxs.slice(0,25).map(t=>`${t.date}|${t.descricao}|${t.cat}|R$${Math.abs(Number(t.value)).toFixed(2)}(${t.type==="in"?"entrada":"saída"})`).join("\n");
+        const system = `Você é a Finn, assistente financeira de um casal no WhatsApp. Seja concisa e amigável, responda em português.
+Período: ${selMonth} | Receitas: R$${income.toFixed(2)} | Despesas: R$${expense.toFixed(2)} | Saldo: R$${balance.toFixed(2)}
+Transações:\n${summary}
+Para registrar transação, inclua no final: <<<{"descricao":"...","value":0,"cat":"...","type":"in|out","date":"YYYY-MM-DD"}>>>`;
+        aiCall(history.map(m=>({role:m.role,content:m.content})), system)
+          .then(async reply => {
+            let r = reply || "⚠️ Finn IA não está ativa.";
+            const jm = r.match(/<<<({.*?})>>>/s);
+            if (jm) {
+              try {
+                const o=JSON.parse(jm[1]); const v=parseFloat(o.value)||0;
+                await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual"});
+                r=r.replace(/<<<{.*?}>>>/s,"").trim();
+              } catch {}
+            }
+            setChatLog(p=>[...p,{role:"assistant",content:r}]);
+            setChatBusy(false);
+          })
+          .catch(()=>{ setChatLog(p=>[...p,{role:"assistant",content:"❌ Erro de conexão."}]); setChatBusy(false); });
+      }, 300);
+    };
+    recognitionRef.current = rec;
+    rec.start();
   };
 
   const sendChat=async()=>{
@@ -696,8 +748,11 @@ Para registrar transação, inclua no final: <<<{"descricao":"...","value":0,"ca
             ))}
           </div>
           <div style={{background:"#ece5dd",borderRadius:"0 0 16px 16px",padding:"10px 12px",display:"flex",gap:8,alignItems:"center",borderLeft:`1px solid ${T.border}`,borderRight:`1px solid ${T.border}`,borderBottom:`1px solid ${T.border}`}}>
-            <input value={chatIn} onChange={e=>setChatIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendChat()} placeholder="Mensagem..." disabled={chatBusy}
+            <input value={chatIn} onChange={e=>setChatIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendChat()} placeholder="Mensagem ou 🎤..." disabled={chatBusy}
               style={{flex:1,padding:"11px 15px",border:"none",borderRadius:99,fontFamily:F,fontSize:14,outline:"none",background:T.surface,color:T.dark}}/>
+            <button onClick={toggleMic} style={{width:42,height:42,borderRadius:99,background:isListening?"#f04f6a":T.surface,border:`1.5px solid ${isListening?"#f04f6a":T.border}`,color:isListening?"#fff":T.sub,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .2s"}}>
+              {isListening?"⏹":"🎤"}
+            </button>
             <button onClick={sendChat} disabled={chatBusy} style={{width:42,height:42,borderRadius:99,background:chatBusy?T.border:T.accent,border:"none",color:"#fff",fontSize:18,cursor:chatBusy?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>➤</button>
           </div>
         </>}
