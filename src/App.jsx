@@ -189,18 +189,13 @@ function EditModal({tx, onSave, onClose}) {
   );
 }
 
-// ── Login Screen (somente login, sem cadastro público) ──
-function LoginScreen({isAdmin}) {
-  const [email, setEmail] = useState("");
-  const [pass, setPass]   = useState("");
+// ── Login Screen ──
+function LoginScreen() {
+  const [email, setEmail]   = useState("");
+  const [pass, setPass]     = useState("");
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg]     = useState(null);
+  const [msg, setMsg]       = useState(null);
   const [forgot, setForgot] = useState(false);
-  // Admin create user mode
-  const [creating, setCreating] = useState(false);
-  const [newEmail, setNewEmail] = useState("");
-  const [newPass, setNewPass]   = useState("");
-  const [createMsg, setCreateMsg] = useState(null);
 
   const inp = {width:"100%",padding:"13px 14px",border:`1.5px solid ${T.border}`,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:T.bg,marginBottom:12};
 
@@ -220,16 +215,6 @@ function LoginScreen({isAdmin}) {
     setLoading(false);
   };
 
-  const handleCreateUser = async () => {
-    if (!newEmail||!newPass) return;
-    setLoading(true); setCreateMsg(null);
-    const {error} = await supabase.auth.signUp({email:newEmail, password:newPass});
-    if (error) setCreateMsg({ok:false, text:error.message});
-    else setCreateMsg({ok:true, text:`✅ Conta criada para ${newEmail}!`});
-    setNewEmail(""); setNewPass("");
-    setLoading(false);
-  };
-
   return (
     <div style={{minHeight:"100vh",background:T.dark,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:F}}>
       <div style={{width:"100%",maxWidth:360}}>
@@ -237,16 +222,15 @@ function LoginScreen({isAdmin}) {
           <div style={{fontSize:42,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>finn<span style={{color:T.accent}}>.</span></div>
           <div style={{fontSize:13,color:"#8b93b0",marginTop:4}}>controle financeiro do casal</div>
         </div>
-
         <div style={{background:T.surface,borderRadius:20,padding:24,boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
           <div style={{fontSize:17,fontWeight:800,marginBottom:20}}>{forgot?"Recuperar senha":"Entrar"}</div>
           <label style={{fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6}}>E-mail</label>
           <input style={inp} type="email" placeholder="seu@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(forgot?handleForgot():handleLogin())}/>
-          {!forgot && <>
+          {!forgot&&<>
             <label style={{fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6}}>Senha</label>
             <input style={inp} type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
           </>}
-          {msg && <div style={{padding:"10px 12px",borderRadius:10,background:msg.startsWith("✅")?T.greenLt:T.redLt,color:msg.startsWith("✅")?"#15a360":T.red,fontSize:13,marginBottom:12}}>{msg}</div>}
+          {msg&&<div style={{padding:"10px 12px",borderRadius:10,background:msg.startsWith("✅")?T.greenLt:T.redLt,color:msg.startsWith("✅")?"#15a360":T.red,fontSize:13,marginBottom:12}}>{msg}</div>}
           <button onClick={forgot?handleForgot:handleLogin} disabled={loading} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer",opacity:loading?.7:1}}>
             {loading?"Aguarde...":forgot?"Enviar e-mail":"Entrar"}
           </button>
@@ -254,20 +238,6 @@ function LoginScreen({isAdmin}) {
             {forgot?"← Voltar para login":"Esqueci minha senha"}
           </button>
         </div>
-
-        {/* Admin: criar conta para outra pessoa */}
-        {isAdmin && <div style={{background:T.surface,borderRadius:20,padding:20,marginTop:16,boxShadow:"0 4px 20px rgba(0,0,0,.2)"}}>
-          <button onClick={()=>setCreating(!creating)} style={{background:"none",border:"none",color:T.accent,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",textAlign:"left"}}>
-            {creating?"▼":"▶"} Criar conta para outra pessoa
-          </button>
-          {creating && <div style={{marginTop:14}}>
-            <input style={{...inp,marginBottom:10}} type="email" placeholder="email da pessoa" value={newEmail} onChange={e=>setNewEmail(e.target.value)}/>
-            <input style={{...inp,marginBottom:10}} type="password" placeholder="senha inicial" value={newPass} onChange={e=>setNewPass(e.target.value)}/>
-            {createMsg && <div style={{padding:"8px 12px",borderRadius:10,background:createMsg.ok?T.greenLt:T.redLt,color:createMsg.ok?"#15a360":T.red,fontSize:12,marginBottom:10}}>{createMsg.text}</div>}
-            <button onClick={handleCreateUser} disabled={loading} style={{width:"100%",padding:"12px",background:T.green,color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer"}}>Criar conta</button>
-          </div>}
-        </div>}
-
         <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#8b93b0"}}>🔒 Acesso restrito · dados salvos na nuvem</div>
       </div>
     </div>
@@ -416,7 +386,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
   const hasAI = !!process.env.REACT_APP_ANTHROPIC_KEY;
 
   if (!authReady) return <div style={{minHeight:"100vh",background:T.dark,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontFamily:F,fontSize:16}}>Carregando...</div>;
-  if (!session)   return <LoginScreen isAdmin={email => email === ADMIN_EMAIL}/>;
+  if (!session)   return <LoginScreen />;
 
   return (
     <div style={{fontFamily:F,background:T.bg,color:T.dark,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative",paddingBottom:76}}>
