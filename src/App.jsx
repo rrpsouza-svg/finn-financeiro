@@ -28,8 +28,6 @@ const CATS = {
 };
 const CAT_LIST = Object.keys(CATS);
 
-// ── Admin email — só este pode criar contas ──
-const ADMIN_EMAIL = "rrpsouza@gmail.com";
 
 // ── Parsers ──
 function parseOFX(text) {
@@ -267,7 +265,6 @@ export default function App() {
   const chatEnd = useRef(null);
   const fileRef = useRef(null);
 
-  const isAdmin = session?.user?.email === ADMIN_EMAIL;
 
   useEffect(() => {
     supabase.auth.getSession().then(({data}) => { setSession(data.session); setAuthReady(true); });
@@ -591,12 +588,6 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
           </div>
         </>}
 
-        {/* Admin: criar conta */}
-        {page==="home"&&isAdmin&&<div style={{...card,border:`1px solid ${T.accent}33`,background:T.accentLt}}>
-          <div style={{fontSize:13,fontWeight:700,color:T.accent,marginBottom:10}}>👑 Painel Admin — Criar nova conta</div>
-          <AdminCreateUser/>
-        </div>}
-
       </div>
 
       {/* Bottom nav */}
@@ -620,28 +611,3 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
   );
 }
 
-function AdminCreateUser() {
-  const [email, setEmail] = useState("");
-  const [pass, setPass]   = useState("");
-  const [msg, setMsg]     = useState(null);
-  const [loading, setLoading] = useState(false);
-  const inp = {width:"100%",padding:"10px 12px",border:`1.5px solid ${T.border}`,borderRadius:10,fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",color:"#1a1f2e",background:"#fff",marginBottom:8};
-  const handle = async () => {
-    if (!email||!pass) return;
-    setLoading(true); setMsg(null);
-    const {error} = await supabase.auth.signUp({email, password:pass});
-    if (error) setMsg({ok:false,text:error.message});
-    else { setMsg({ok:true,text:`✅ Conta criada para ${email}`}); setEmail(""); setPass(""); }
-    setLoading(false);
-  };
-  return (
-    <div>
-      <input style={inp} type="email" placeholder="email do usuário" value={email} onChange={e=>setEmail(e.target.value)}/>
-      <input style={inp} type="password" placeholder="senha inicial" value={pass} onChange={e=>setPass(e.target.value)}/>
-      {msg&&<div style={{fontSize:12,padding:"8px 10px",borderRadius:8,background:msg.ok?"#e8faf2":"#fef0f3",color:msg.ok?"#15a360":"#f04f6a",marginBottom:8}}>{msg.text}</div>}
-      <button onClick={handle} disabled={loading} style={{width:"100%",padding:"11px",background:"#5b6af0",color:"#fff",border:"none",borderRadius:10,fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:14,fontWeight:700,cursor:"pointer",opacity:loading?.7:1}}>
-        {loading?"Criando...":"Criar conta"}
-      </button>
-    </div>
-  );
-}
