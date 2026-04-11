@@ -359,9 +359,22 @@ export default function App() {
     const v = parseFloat(form.value);
     if (!form.descricao||isNaN(v)||v<=0) return;
     setSavingTx(true);
-    await saveTx({date:form.date,descricao:form.descricao,cat:form.cat,value:form.type==="out"?-Math.abs(v):Math.abs(v),type:INCOME_CATS.includes(form.cat)?"in":"out",src:"manual"});
-    setForm(f=>({...f,descricao:"",value:""}));
-    setSavingTx(false);
+    try {
+      const isIncome = INCOME_CATS.includes(form.cat);
+      await saveTx({
+        date:form.date,
+        descricao:form.descricao,
+        cat:form.cat,
+        value:isIncome?Math.abs(v):-Math.abs(v),
+        type:isIncome?"in":"out",
+        src:"manual"
+      });
+      setForm(f=>({...f,descricao:"",value:""}));
+    } catch(e) {
+      console.error("Erro ao salvar:", e);
+    } finally {
+      setSavingTx(false);
+    }
   };
 
   const sendChat = async () => {
@@ -547,7 +560,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
               ))}
             </div>
           </div>
-          <button onClick={addTx} disabled={savingTx} style={{width:"100%",padding:"15px",background:form.type==="out"?T.red:T.green,color:"#fff",border:"none",borderRadius:14,fontFamily:F,fontSize:16,fontWeight:700,cursor:"pointer",opacity:savingTx?.7:1}}>
+          <button onClick={addTx} disabled={savingTx} style={{width:"100%",padding:"15px",background:form.type==="out"?T.red:T.green,color:"#fff",border:"none",borderRadius:14,fontFamily:F,fontSize:16,fontWeight:700,cursor:"pointer",opacity:savingTx?0.7:1}}>
             {savingTx?"Salvando...":(form.type==="out"?"Registrar Despesa":"Registrar Receita")}
           </button>
         </>}
