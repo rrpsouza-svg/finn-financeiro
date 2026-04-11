@@ -70,7 +70,6 @@ function parseCSV(text) {
 
 // ── XLSX/Modelo Finn parser ──
 function parseModeloFinn(text) {
-  // Parse CSV exported from the Excel model
   const lines = text.trim().split(/
 ?
 /).filter(Boolean);
@@ -78,55 +77,47 @@ function parseModeloFinn(text) {
   const hdrs = lines[0].split(",").map(h => h.replace(/"/g,"").trim().toUpperCase());
   
   const idx = k => hdrs.findIndex(h => h.includes(k));
-  const iDataPag  = [idx("DATA_PAG"), idx("PAGAMENTO")].find(x => x >= 0) ?? 1;
-  const iDataComp = [idx("DATA_COM"), idx("COMPRA")].find(x => x >= 0) ?? 0;
-  const iDesc     = idx("DESCRI") >= 0 ? idx("DESCRI") : 2;
-  const iValor    = idx("VALOR") >= 0 ? idx("VALOR") : 3;
-  const iTipo     = idx("TIPO") >= 0 ? idx("TIPO") : 4;
-  const iConta    = idx("CONTA") >= 0 ? idx("CONTA") : 5;
-  const iCat      = idx("CATEG") >= 0 ? idx("CATEG") : 6;
-  const iParcAtual= idx("PARCELA_A") >= 0 ? idx("PARCELA_A") : 7;
-  const iParcTotal= idx("TOTAL_P") >= 0 ? idx("TOTAL_P") : 8;
-  const iGrupo    = idx("GRUPO") >= 0 ? idx("GRUPO") : 9;
+  const iDataPag   = [idx("DATA_PAG"),idx("PAGAMENTO")].find(x=>x>=0) ?? 1;
+  const iDataComp  = [idx("DATA_COM"),idx("COMPRA")].find(x=>x>=0) ?? 0;
+  const iDesc      = idx("DESCRI")>=0?idx("DESCRI"):2;
+  const iValor     = idx("VALOR")>=0?idx("VALOR"):3;
+  const iTipo      = idx("TIPO")>=0?idx("TIPO"):4;
+  const iConta     = idx("CONTA")>=0?idx("CONTA"):5;
+  const iCat       = idx("CATEG")>=0?idx("CATEG"):6;
+  const iParcAtual = idx("PARCELA_A")>=0?idx("PARCELA_A"):7;
+  const iParcTotal = idx("TOTAL_P")>=0?idx("TOTAL_P"):8;
+  const iGrupo     = idx("GRUPO")>=0?idx("GRUPO"):9;
 
   const parseDate = s => {
     if (!s) return new Date().toISOString().slice(0,10);
     s = s.replace(/"/g,"").trim();
-    // DD/MM/AAAA
-    const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-    // AAAA-MM-DD already
-    if (/\d{4}-\d{2}-\d{2}/.test(s)) return s;
+    const parts = s.split("/");
+    if (parts.length === 3 && parts[2].length === 4) {
+      return parts[2] + "-" + parts[1].padStart(2,"0") + "-" + parts[0].padStart(2,"0");
+    }
+    if (s.length === 10 && s[4] === "-") return s;
     return new Date().toISOString().slice(0,10);
   };
 
   return lines.slice(1).map(line => {
     const c = line.split(",").map(s => s.replace(/"/g,"").trim());
     if (!c[iDesc] || c[iDesc].startsWith("▼")) return null;
-    
     const rawVal = (c[iValor]||"0").replace(/\./g,"").replace(",",".");
-    const valor  = parseFloat(rawVal);
+    const valor = parseFloat(rawVal);
     if (isNaN(valor) || valor <= 0) return null;
-
     const tipo  = (c[iTipo]||"").toLowerCase();
     const isRec = tipo.includes("receita");
-    const cat   = c[iCat] || (isRec ? "Outras Receitas" : "Outros");
-    
-    // Use DATA_PAGAMENTO as competência date
-    const date = parseDate(c[iDataPag]) || parseDate(c[iDataComp]);
-    
+    const cat   = c[iCat] || (isRec?"Outras Receitas":"Outros");
+    const date  = parseDate(c[iDataPag]) || parseDate(c[iDataComp]);
     return {
-      date,
-      date_compra: parseDate(c[iDataComp]),
-      descricao: c[iDesc],
-      cat,
-      value: isRec ? valor : -valor,
-      type: isRec ? "in" : "out",
-      src: "modelo",
-      conta: c[iConta] || "",
+      date, descricao:c[iDesc], cat,
+      value: isRec?valor:-valor,
+      type: isRec?"in":"out",
+      src:"modelo",
+      conta: c[iConta]||"",
       parcela_atual: parseInt(c[iParcAtual])||null,
       total_parcelas: parseInt(c[iParcTotal])||null,
-      grupo_parcela: c[iGrupo] || null,
+      grupo_parcela: c[iGrupo]||null,
     };
   }).filter(Boolean);
 }
