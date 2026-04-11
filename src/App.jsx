@@ -403,7 +403,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
 
   const shown = filterSrc==="all"?txs:txs.filter(t=>t.src===filterSrc);
   const card  = {background:T.card,borderRadius:16,padding:16,boxShadow:T.shadow,border:`1px solid ${T.border}`,marginBottom:12};
-  const inp   = {width:"100%",padding:"12px 14px",border:`1.5px solid ${T.border}`,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:T.bg};
+  const inp   = {width:"100%",padding:"12px 14px",border:`2px solid ${T.border}`,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",boxShadow:"inset 0 1px 3px rgba(0,0,0,.06)",transition:"border-color .15s"};
   const lbl   = {fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
   const NAV   = [{id:"home",icon:"📊",label:"Início"},{id:"txns",icon:"📋",label:"Extrato"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
   const hasAI = !!process.env.REACT_APP_ANTHROPIC_KEY;
@@ -648,6 +648,14 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
         @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}}
         ::-webkit-scrollbar{width:3px;height:3px}
         ::-webkit-scrollbar-thumb{background:${T.border};border-radius:99px}
+        input:focus, select:focus {
+          border-color: ${T.accent} !important;
+          box-shadow: 0 0 0 3px ${T.accent}22 !important;
+          outline: none;
+        }
+        input::placeholder { color: #b0b8d0; }
+        input[type=number] { -moz-appearance: textfield; }
+        input[type=number]::-webkit-inner-spin-button { opacity: 0.4; }
       `}</style>
     </div>
   );
