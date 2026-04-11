@@ -306,11 +306,14 @@ export default function App() {
   };
 
   const updateTx = async (tx) => {
-    const {data,error} = await supabase.from("transactions").update({
+    const {error} = await supabase.from("transactions").update({
       descricao:tx.descricao, value:tx.value, cat:tx.cat, type:tx.type, date:tx.date
-    }).eq("id",tx.id).select().single();
-    if (!error&&data) setTxs(p=>p.map(t=>t.id===tx.id?data:t));
+    }).eq("id",tx.id);
     setEditTx(null);
+    if (!error) {
+      const {data} = await supabase.from("transactions").select("*").order("date",{ascending:false});
+      if (data) setTxs(data);
+    }
   };
 
   const deleteTx = async (id) => {
