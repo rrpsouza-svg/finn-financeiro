@@ -68,6 +68,69 @@ function parseCSV(text) {
   }).filter(Boolean);
 }
 
+// ── XLSX/Modelo Finn parser ──
+function parseModeloFinn(text) {
+  // Parse CSV exported from the Excel model
+  const lines = text.trim().split(/
+?
+/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const hdrs = lines[0].split(",").map(h => h.replace(/"/g,"").trim().toUpperCase());
+  
+  const idx = k => hdrs.findIndex(h => h.includes(k));
+  const iDataPag  = [idx("DATA_PAG"), idx("PAGAMENTO")].find(x => x >= 0) ?? 1;
+  const iDataComp = [idx("DATA_COM"), idx("COMPRA")].find(x => x >= 0) ?? 0;
+  const iDesc     = idx("DESCRI") >= 0 ? idx("DESCRI") : 2;
+  const iValor    = idx("VALOR") >= 0 ? idx("VALOR") : 3;
+  const iTipo     = idx("TIPO") >= 0 ? idx("TIPO") : 4;
+  const iConta    = idx("CONTA") >= 0 ? idx("CONTA") : 5;
+  const iCat      = idx("CATEG") >= 0 ? idx("CATEG") : 6;
+  const iParcAtual= idx("PARCELA_A") >= 0 ? idx("PARCELA_A") : 7;
+  const iParcTotal= idx("TOTAL_P") >= 0 ? idx("TOTAL_P") : 8;
+  const iGrupo    = idx("GRUPO") >= 0 ? idx("GRUPO") : 9;
+
+  const parseDate = s => {
+    if (!s) return new Date().toISOString().slice(0,10);
+    s = s.replace(/"/g,"").trim();
+    // DD/MM/AAAA
+    const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    // AAAA-MM-DD already
+    if (/\d{4}-\d{2}-\d{2}/.test(s)) return s;
+    return new Date().toISOString().slice(0,10);
+  };
+
+  return lines.slice(1).map(line => {
+    const c = line.split(",").map(s => s.replace(/"/g,"").trim());
+    if (!c[iDesc] || c[iDesc].startsWith("▼")) return null;
+    
+    const rawVal = (c[iValor]||"0").replace(/\./g,"").replace(",",".");
+    const valor  = parseFloat(rawVal);
+    if (isNaN(valor) || valor <= 0) return null;
+
+    const tipo  = (c[iTipo]||"").toLowerCase();
+    const isRec = tipo.includes("receita");
+    const cat   = c[iCat] || (isRec ? "Outras Receitas" : "Outros");
+    
+    // Use DATA_PAGAMENTO as competência date
+    const date = parseDate(c[iDataPag]) || parseDate(c[iDataComp]);
+    
+    return {
+      date,
+      date_compra: parseDate(c[iDataComp]),
+      descricao: c[iDesc],
+      cat,
+      value: isRec ? valor : -valor,
+      type: isRec ? "in" : "out",
+      src: "modelo",
+      conta: c[iConta] || "",
+      parcela_atual: parseInt(c[iParcAtual])||null,
+      total_parcelas: parseInt(c[iParcTotal])||null,
+      grupo_parcela: c[iGrupo] || null,
+    };
+  }).filter(Boolean);
+}
+
 async function aiCall(messages, system, maxTokens=800) {
   const KEY = process.env.REACT_APP_ANTHROPIC_KEY;
   if (!KEY) return null;
@@ -320,17 +383,48 @@ export default function App() {
     const files=Array.from(e.target.files||[]);setImporting(true);
     for(const file of files){
       const text=await file.text();const name=file.name.toLowerCase();let parsed=[];
+      let isModelo=false;
       if(name.endsWith(".ofx")||text.includes("<STMTTRN>")){parsed=parseOFX(text);}
-      else if(name.endsWith(".csv")){parsed=parseCSV(text);}
-      else{setImportLog(p=>[`⚠️ ${file.name}: não suportado`,...p]);continue;}
-      setImportLog(p=>[`⏳ ${file.name}: classificando ${parsed.length} transações...`,...p]);
-      const categorized=await categorizarComIA(parsed);
-      const{data}=await supabase.from("transactions").insert(categorized).select();
-      if(data)setTxs(p=>[...data,...p]);
-      setImportLog(p=>{const n=[...p];n[0]=`✅ ${file.name}: ${categorized.length} importadas`;return n;});
+      else if(name.endsWith(".csv")||name.endsWith(".xlsx")){
+        // Detect if it's the finn model (has DATA_PAGAMENTO header)
+        if(text.includes("DATA_PAG")||text.includes("PAGAMENTO")||text.includes("GRUPO_PARCELA")){
+          parsed=parseModeloFinn(text); isModelo=true;
+        } else { parsed=parseCSV(text); }
+      }else{setImportLog(p=>[`⚠️ ${file.name}: não suportado`,...p]);continue;}
+      
+      if(parsed.length===0){setImportLog(p=>[`⚠️ ${file.name}: nenhuma transação encontrada`,...p]);continue;}
+      
+      // Only auto-categorize items without category
+      const semCat = parsed.filter(t=>!t.cat||t.cat==="Outros"||t.cat==="Outras Receitas");
+      const comCat = parsed.filter(t=>t.cat&&t.cat!=="Outros"&&t.cat!=="Outras Receitas");
+      
+      setImportLog(p=>[`⏳ ${file.name}: processando ${parsed.length} transações...`,...p]);
+      
+      let categorized=[...comCat];
+      if(semCat.length>0&&hasAI){
+        const aiCat=await categorizarComIA(semCat);
+        categorized=[...categorized,...aiCat];
+      } else { categorized=[...categorized,...semCat]; }
+      
+      // Remove extra fields not in DB before inserting
+      const toInsert=categorized.map(({date,descricao,cat,value,type,src,conta,parcela_atual,total_parcelas,grupo_parcela})=>({
+        date,descricao,cat,value,type,src:src||"modelo",
+        ...(conta?{conta}:{}),
+        ...(parcela_atual?{parcela_atual}:{}),
+        ...(total_parcelas?{total_parcelas}:{}),
+        ...(grupo_parcela?{grupo_parcela}:{}),
+      }));
+      
+      // Insert in chunks of 50
+      let inserted=0;
+      for(let i=0;i<toInsert.length;i+=50){
+        const{data}=await supabase.from("transactions").insert(toInsert.slice(i,i+50)).select();
+        if(data){setTxs(p=>[...data,...p]);inserted+=data.length;}
+      }
+      setImportLog(p=>{const n=[...p];n[0]=`✅ ${file.name}: ${inserted} transações importadas${isModelo?" (modelo finn)":""}`;return n;});
     }
     setImporting(false);e.target.value="";
-  },[]);
+  },[txs,hasAI]);
 
   // ── Recategorize ALL with AI ──
   const recategorizarTudo=async()=>{
@@ -689,9 +783,9 @@ Para registrar transação, inclua no final: <<<{"descricao":"...","value":0,"ca
           <p style={{color:T.sub,fontSize:13,margin:"0 0 14px"}}>OFX · CSV · classificação automática por IA</p>
           <div onClick={()=>!importing&&fileRef.current?.click()} style={{border:`2px dashed ${importing?T.accent:T.border}`,borderRadius:16,padding:32,textAlign:"center",cursor:importing?"default":"pointer",background:T.card,marginBottom:14}}>
             <div style={{fontSize:40,marginBottom:10}}>{importing?"🤖":"📤"}</div>
-            <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>{importing?"Classificando com IA...":"Toque para selecionar"}</div>
-            <div style={{fontSize:12,color:T.sub}}>.ofx · .csv</div>
-            <input ref={fileRef} type="file" accept=".ofx,.csv" multiple style={{display:"none"}} onChange={handleFiles}/>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>{importing?"Processando...":"Toque para selecionar"}</div>
+            <div style={{fontSize:12,color:T.sub}}>.ofx · .csv · .xlsx (modelo finn)</div>
+            <input ref={fileRef} type="file" accept=".ofx,.csv,.xlsx,.txt" multiple style={{display:"none"}} onChange={handleFiles}/>
           </div>
 
           {/* Recategorize all */}
