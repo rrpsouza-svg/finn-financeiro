@@ -14,18 +14,24 @@ const F = "'Plus Jakarta Sans',sans-serif";
 const M = "'JetBrains Mono',monospace";
 
 const CATS = {
-  Moradia:     {icon:"🏠",color:"#7c6af0"},
-  Alimentação: {icon:"🍽️",color:"#f0884a"},
-  Transporte:  {icon:"🚗",color:"#4fa3f0"},
-  Saúde:       {icon:"💊",color:"#f04f6a"},
-  Lazer:       {icon:"🎬",color:"#f5b544"},
-  Assinaturas: {icon:"📱",color:"#22c77a"},
-  Educação:    {icon:"📚",color:"#5b6af0"},
-  Roupas:      {icon:"👗",color:"#e879a8"},
-  Receita:     {icon:"💰",color:"#22c77a"},
-  Investimento:{icon:"📈",color:"#0ea5e9"},
-  Outros:      {icon:"📦",color:"#8b93b0"},
+  // Despesas
+  Moradia:          {icon:"🏠",color:"#7c6af0"},
+  Alimentação:      {icon:"🍽️",color:"#f0884a"},
+  Transporte:       {icon:"🚗",color:"#4fa3f0"},
+  Saúde:            {icon:"💊",color:"#f04f6a"},
+  Lazer:            {icon:"🎬",color:"#f5b544"},
+  Assinaturas:      {icon:"📱",color:"#22c77a"},
+  Educação:         {icon:"📚",color:"#5b6af0"},
+  Roupas:           {icon:"👗",color:"#e879a8"},
+  Investimento:     {icon:"📈",color:"#0ea5e9"},
+  Outros:           {icon:"📦",color:"#8b93b0"},
+  // Receitas
+  "Receita Raphael":{icon:"👨",color:"#22c77a"},
+  "Receita Julia":  {icon:"👩",color:"#a78bfa"},
+  "Outras Receitas":{icon:"💰",color:"#f5b544"},
 };
+const INCOME_CATS  = ["Receita Raphael","Receita Julia","Outras Receitas"];
+const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c));
 const CAT_LIST = Object.keys(CATS);
 
 
@@ -37,7 +43,7 @@ function parseOFX(text) {
     const raw = get("DTPOSTED");
     const date = raw.length >= 8 ? `${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}` : new Date().toISOString().slice(0,10);
     const amt = parseFloat(get("TRNAMT") || "0");
-    return { date, descricao: get("MEMO")||get("NAME")||"Transação", cat:"Outros", value: amt, type: amt>=0?"in":"out", src:"OFX" };
+    return { date, descricao: get("MEMO")||get("NAME")||"Transação", cat: amt>=0?"Outras Receitas":"Outros", value: amt, type: amt>=0?"in":"out", src:"OFX" };
   });
 }
 
@@ -173,7 +179,7 @@ function EditModal({tx, onSave, onClose}) {
         <div style={{marginBottom:20}}>
           <label style={lbl}>Categoria</label>
           <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
-            {CAT_LIST.map(c=>(
+            {[...EXPENSE_CATS,...INCOME_CATS].map(c=>(
               <button key={c} onClick={()=>setForm(f=>({...f,cat:c}))} style={{padding:"6px 11px",borderRadius:99,border:`1.5px solid ${form.cat===c?CATS[c].color:T.border}`,background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>
             ))}
           </div>
@@ -292,13 +298,17 @@ export default function App() {
 
   const signOut = () => { supabase.auth.signOut(); setTxs([]); };
 
-  const income  = txs.filter(t=>t.type==="in"&&t.cat==="Receita").reduce((a,t)=>a+Number(t.value),0);
+  const income  = txs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0);
   const expense = txs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
   const balance = income - expense;
   const savPct  = income>0?(balance/income*100):0;
-  const catData = CAT_LIST.filter(c=>c!=="Receita").map(c=>({
+  const catData = EXPENSE_CATS.map(c=>({
     label:c,...CATS[c],val:txs.filter(t=>t.cat===c&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0)
   })).filter(d=>d.val>0).sort((a,b)=>b.val-a.val);
+
+  const incomeData = INCOME_CATS.map(c=>({
+    label:c,...CATS[c], val:txs.filter(t=>t.cat===c&&t.type==="in").reduce((a,t)=>a+Number(t.value),0)
+  })).filter(d=>d.val>0);
 
   const saveTx = async (tx) => {
     const {data,error} = await supabase.from("transactions").insert([tx]).select().single();
@@ -436,7 +446,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
               </div>
             </div>
             {catData.length>0&&<div style={card}>
-              <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>Gastos por categoria</div>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>💸 Gastos por categoria</div>
               <div style={{display:"flex",alignItems:"center",gap:16}}>
                 <Donut segs={catData.slice(0,5).map(d=>({val:d.val,color:d.color}))} size={80}/>
                 <div style={{flex:1}}>
@@ -445,6 +455,22 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
                       <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
                       <span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span>
                       <span style={{fontSize:12,fontWeight:700,fontFamily:M}}>R${d.val.toFixed(0)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>}
+
+            {incomeData.length>0&&<div style={card}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>💰 Receitas por origem</div>
+              <div style={{display:"flex",alignItems:"center",gap:16}}>
+                <Donut segs={incomeData.map(d=>({val:d.val,color:d.color}))} size={80}/>
+                <div style={{flex:1}}>
+                  {incomeData.map(d=>(
+                    <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                      <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
+                      <span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span>
+                      <span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>R${d.val.toFixed(0)}</span>
                     </div>
                   ))}
                 </div>
@@ -516,7 +542,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
           <div style={{marginBottom:18}}>
             <label style={lbl}>Categoria</label>
             <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-              {CAT_LIST.filter(c=>form.type==="in"?c==="Receita":c!=="Receita").map(c=>(
+              {form.type==="in" ? INCOME_CATS : EXPENSE_CATS.map(c=>(
                 <button key={c} onClick={()=>setForm(f=>({...f,cat:c}))} style={{padding:"7px 13px",borderRadius:99,border:`1.5px solid ${form.cat===c?CATS[c].color:T.border}`,background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:13,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>
               ))}
             </div>
