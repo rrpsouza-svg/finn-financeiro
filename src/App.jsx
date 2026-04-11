@@ -53,7 +53,8 @@ function parseOFX(text) {
 }
 
 function parseCSV(text) {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  const lines = text.trim().split("
+").filter(Boolean);
   if (lines.length<2) return [];
   const hdrs = lines[0].toLowerCase().split(",").map(h=>h.replace(/"/g,"").trim());
   const idx = k => hdrs.findIndex(h=>h.includes(k));
@@ -70,9 +71,8 @@ function parseCSV(text) {
 
 // ── XLSX/Modelo Finn parser ──
 function parseModeloFinn(text) {
-  const lines = text.trim().split(/
-?
-/).filter(Boolean);
+  const lines = text.trim().split("
+").filter(Boolean);
   if (lines.length < 2) return [];
   const hdrs = lines[0].split(",").map(h => h.replace(/"/g,"").trim().toUpperCase());
   
