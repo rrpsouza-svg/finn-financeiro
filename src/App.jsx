@@ -359,7 +359,7 @@ export default function App() {
     const v = parseFloat(form.value);
     if (!form.descricao||isNaN(v)||v<=0) return;
     setSavingTx(true);
-    await saveTx({date:form.date,descricao:form.descricao,cat:form.cat,value:form.type==="out"?-v:v,type:form.type,src:"manual"});
+    await saveTx({date:form.date,descricao:form.descricao,cat:form.cat,value:form.type==="out"?-Math.abs(v):Math.abs(v),type:INCOME_CATS.includes(form.cat)?"in":"out",src:"manual"});
     setForm(f=>({...f,descricao:"",value:""}));
     setSavingTx(false);
   };
@@ -528,7 +528,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
           <div style={{fontWeight:800,fontSize:18,marginBottom:16}}>Novo Lançamento</div>
           <div style={{display:"flex",background:"#e8eaf2",borderRadius:12,padding:4,marginBottom:16}}>
             {[["out","💸 Despesa",T.red],["in","💰 Receita",T.green]].map(([v,l,c])=>(
-              <button key={v} onClick={()=>setForm(f=>({...f,type:v,cat:v==="in"?"Receita":"Alimentação"}))} style={{flex:1,padding:"11px",border:"none",borderRadius:9,background:form.type===v?T.card:"transparent",color:form.type===v?c:T.sub,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:form.type===v?T.shadow:"none",transition:"all .2s"}}>{l}</button>
+              <button key={v} onClick={()=>setForm(f=>({...f,type:v,cat:v==="in"?"Receita Raphael":"Alimentação"}))} style={{flex:1,padding:"11px",border:"none",borderRadius:9,background:form.type===v?T.card:"transparent",color:form.type===v?c:T.sub,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:form.type===v?T.shadow:"none",transition:"all .2s"}}>{l}</button>
             ))}
           </div>
           <div style={{marginBottom:12}}>
@@ -542,7 +542,7 @@ Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","v
           <div style={{marginBottom:18}}>
             <label style={lbl}>Categoria</label>
             <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-              {form.type==="in" ? INCOME_CATS : EXPENSE_CATS.map(c=>(
+              {(form.type==="in" ? INCOME_CATS : EXPENSE_CATS).map(c=>(
                 <button key={c} onClick={()=>setForm(f=>({...f,cat:c}))} style={{padding:"7px 13px",borderRadius:99,border:`1.5px solid ${form.cat===c?CATS[c].color:T.border}`,background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:13,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>
               ))}
             </div>
