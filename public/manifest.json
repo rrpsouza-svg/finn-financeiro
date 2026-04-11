@@ -1,0 +1,9 @@
+{
+  "short_name": "Finn",
+  "name": "Finn · Controle Financeiro",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1a1f2e",
+  "background_color": "#f4f6fb",
+  "orientation": "portrait"
+}

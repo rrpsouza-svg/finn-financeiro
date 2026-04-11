@@ -1,0 +1,541 @@
+import { useState, useRef, useEffect, useCallback } from "react";
+import { supabase } from "./supabase";
+
+const T = {
+  bg:"#f4f6fb", surface:"#fff", card:"#fff",
+  accent:"#5b6af0", accentLt:"#eef0ff",
+  green:"#22c77a", greenLt:"#e8faf2",
+  red:"#f04f6a", redLt:"#fef0f3",
+  yellow:"#f5b544", yellowLt:"#fef8ec",
+  dark:"#1a1f2e", sub:"#6b7394", border:"#e8eaf2",
+  shadow:"0 2px 10px rgba(26,31,46,.08)",
+};
+const F = "'Plus Jakarta Sans',sans-serif";
+const M = "'JetBrains Mono',monospace";
+
+const CATS = {
+  Moradia:     {icon:"🏠",color:"#7c6af0"},
+  Alimentação: {icon:"🍽️",color:"#f0884a"},
+  Transporte:  {icon:"🚗",color:"#4fa3f0"},
+  Saúde:       {icon:"💊",color:"#f04f6a"},
+  Lazer:       {icon:"🎬",color:"#f5b544"},
+  Assinaturas: {icon:"📱",color:"#22c77a"},
+  Educação:    {icon:"📚",color:"#5b6af0"},
+  Roupas:      {icon:"👗",color:"#e879a8"},
+  Receita:     {icon:"💰",color:"#22c77a"},
+  Outros:      {icon:"📦",color:"#8b93b0"},
+};
+const CAT_LIST = Object.keys(CATS);
+
+/* ─── Parsers ── */
+function parseOFX(text) {
+  const blocks = text.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || [];
+  return blocks.map((b) => {
+    const get = tag => { const m = b.match(new RegExp(`<${tag}>([^<\n\r]+)`, "i")); return m ? m[1].trim() : ""; };
+    const raw = get("DTPOSTED");
+    const date = raw.length >= 8 ? `${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}` : new Date().toISOString().slice(0,10);
+    const amt = parseFloat(get("TRNAMT") || "0");
+    return { date, descricao: get("MEMO")||get("NAME")||"Transação", cat: amt>=0?"Receita":"Outros", value: amt, type: amt>=0?"in":"out", src:"OFX" };
+  });
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const hdrs = lines[0].toLowerCase().split(",").map(h => h.replace(/"/g,"").trim());
+  const idx = k => hdrs.findIndex(h => h.includes(k));
+  const di = [idx("data"),idx("date")].find(x => x >= 0) ?? 0;
+  const ni = [idx("descri"),idx("estabelec"),idx("memo"),idx("name")].find(x => x >= 0) ?? 1;
+  const vi = [idx("valor"),idx("amount"),idx("value")].find(x => x >= 0) ?? 2;
+  return lines.slice(1).map((line) => {
+    const c = line.split(",").map(s => s.replace(/"/g,"").trim());
+    const amt = parseFloat((c[vi]||"0").replace(",",".")) * (hdrs[vi]?.includes("debito") ? -1 : 1);
+    if (isNaN(amt)) return null;
+    return { date: c[di]||new Date().toISOString().slice(0,10), descricao: c[ni]||"Transação", cat: amt>=0?"Receita":"Outros", value: amt, type: amt>=0?"in":"out", src:"CSV" };
+  }).filter(Boolean);
+}
+
+async function parsePDFWithAI(text) {
+  const KEY = process.env.REACT_APP_ANTHROPIC_KEY;
+  if (!KEY) return [];
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"Content-Type":"application/json","x-api-key":KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1500,
+      messages:[{role:"user",content:`Extraia transações de extrato bancário brasileiro. Retorne APENAS JSON array sem markdown:\n[{"date":"YYYY-MM-DD","descricao":"...","value":0,"cat":"categoria"}]\nCategorias: ${CAT_LIST.join(", ")}\nNegativos=despesa.\n\nTEXTO:\n${text.slice(0,3000)}`}]
+    })
+  });
+  const data = await res.json();
+  const raw = data.content?.map(b=>b.text||"").join("")||"[]";
+  try {
+    const arr = JSON.parse(raw.replace(/```json|```/g,"").trim());
+    return arr.map(t => ({ date:t.date, descricao:t.descricao||t.desc||"Transação", cat:t.cat||"Outros", value:t.value, type:t.value>=0?"in":"out", src:"PDF" }));
+  } catch { return []; }
+}
+
+/* ─── UI helpers ── */
+function Donut({ segs, size=80 }) {
+  const r=28,cx=size/2,cy=size/2,stroke=10,circ=2*Math.PI*r;
+  const total=segs.reduce((a,s)=>a+s.val,0)||1; let off=0;
+  return (
+    <svg width={size} height={size}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={T.border} strokeWidth={stroke}/>
+      {segs.map((s,i)=>{const d=(s.val/total)*circ;const el=<circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={stroke} strokeDasharray={`${d} ${circ-d}`} strokeDashoffset={-off*circ} strokeLinecap="butt"/>;off+=s.val/total;return el;})}
+    </svg>
+  );
+}
+
+function SrcBadge({src}) {
+  const c=src==="OFX"?{bg:"#eef0ff",cl:T.accent}:src==="CSV"?{bg:T.greenLt,cl:"#15a360"}:src==="PDF"?{bg:T.yellowLt,cl:"#c2880a"}:{bg:T.border,cl:T.sub};
+  return <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:99,background:c.bg,color:c.cl,fontFamily:M,letterSpacing:.4,flexShrink:0}}>{src}</span>;
+}
+
+function WaBubble({msg}) {
+  const isMe=msg.role==="user";
+  return (
+    <div style={{display:"flex",justifyContent:isMe?"flex-end":"flex-start",marginBottom:6,alignItems:"flex-end",gap:6}}>
+      {!isMe&&<div style={{width:26,height:26,borderRadius:99,background:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>🤖</div>}
+      <div style={{maxWidth:"78%",padding:"9px 13px",borderRadius:isMe?"16px 4px 16px 16px":"4px 16px 16px 16px",
+        background:isMe?T.accent:T.surface,color:isMe?"#fff":T.dark,
+        fontSize:13,lineHeight:1.5,fontFamily:F,whiteSpace:"pre-wrap",
+        boxShadow:T.shadow,border:isMe?"none":`1px solid ${T.border}`}}>
+        {msg.content}
+        <div style={{fontSize:9,marginTop:3,opacity:.5,textAlign:"right",fontFamily:M}}>
+          {new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})} {isMe?"✓✓":""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Login Screen ── */
+function LoginScreen() {
+  const [mode, setMode] = useState("login");
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const inp = {width:"100%",padding:"13px 14px",border:`1.5px solid ${T.border}`,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:T.bg,marginBottom:12};
+
+  const handle = async () => {
+    if (!email || (!pass && mode !== "forgot")) return;
+    setLoading(true); setMsg(null);
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+        if (error) setMsg({text:"E-mail ou senha incorretos.", ok:false});
+      } else if (mode === "register") {
+        const { error } = await supabase.auth.signUp({ email, password: pass });
+        if (error) setMsg({text:error.message, ok:false});
+        else setMsg({text:"✅ Conta criada! Verifique seu e-mail para confirmar.", ok:true});
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        if (error) setMsg({text:error.message, ok:false});
+        else setMsg({text:"✅ E-mail de recuperação enviado!", ok:true});
+      }
+    } catch { setMsg({text:"Erro de conexão.", ok:false}); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:T.dark,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:F}}>
+      <div style={{width:"100%",maxWidth:360}}>
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <div style={{fontSize:42,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>finn<span style={{color:T.accent}}>.</span></div>
+          <div style={{fontSize:13,color:"#8b93b0",marginTop:4}}>controle financeiro do casal</div>
+        </div>
+        <div style={{background:T.surface,borderRadius:20,padding:24,boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
+          <div style={{fontSize:17,fontWeight:800,marginBottom:20,color:T.dark}}>
+            {mode==="login"?"Entrar":mode==="register"?"Criar conta":"Recuperar senha"}
+          </div>
+          <label style={{fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6}}>E-mail</label>
+          <input style={inp} type="email" placeholder="seu@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+          {mode !== "forgot" && <>
+            <label style={{fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6}}>Senha</label>
+            <input style={inp} type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()}/>
+          </>}
+          {msg && <div style={{padding:"10px 12px",borderRadius:10,background:msg.ok?T.greenLt:T.redLt,color:msg.ok?"#15a360":T.red,fontSize:13,marginBottom:12}}>{msg.text}</div>}
+          <button onClick={handle} disabled={loading} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:loading?"default":"pointer",opacity:loading?.7:1}}>
+            {loading?"Aguarde...":(mode==="login"?"Entrar":mode==="register"?"Criar conta":"Enviar e-mail")}
+          </button>
+          <div style={{marginTop:16,display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+            {mode==="login" && <>
+              <button onClick={()=>{setMode("register");setMsg(null);}} style={{background:"none",border:"none",color:T.accent,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:F}}>Não tem conta? Criar agora</button>
+              <button onClick={()=>{setMode("forgot");setMsg(null);}} style={{background:"none",border:"none",color:T.sub,fontSize:12,cursor:"pointer",fontFamily:F}}>Esqueci minha senha</button>
+            </>}
+            {mode !== "login" && <button onClick={()=>{setMode("login");setMsg(null);}} style={{background:"none",border:"none",color:T.accent,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:F}}>← Voltar para login</button>}
+          </div>
+        </div>
+        <div style={{textAlign:"center",marginTop:20,fontSize:11,color:"#8b93b0"}}>🔒 Dados salvos com segurança na nuvem</div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════
+   MAIN APP
+══════════════════════════════════════════ */
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [txs, setTxs] = useState([]);
+  const [loadingTxs, setLoadingTxs] = useState(false);
+  const [page, setPage] = useState("home");
+  const [chatLog, setChatLog] = useState([
+    {role:"assistant",content:"Olá! 👋 Sou a *Finn*, assistente financeira de vocês.\n\nPosso analisar os gastos, registrar transações e dar dicas.\n\nO que precisam?"}
+  ]);
+  const [chatIn, setChatIn] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [form, setForm] = useState({descricao:"",value:"",cat:"Alimentação",type:"out",date:new Date().toISOString().slice(0,10)});
+  const [importLog, setImportLog] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [filterSrc, setFilterSrc] = useState("all");
+  const [savingTx, setSavingTx] = useState(false);
+  const chatEnd = useRef(null);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    setLoadingTxs(true);
+    supabase.from("transactions").select("*").order("date", {ascending:false})
+      .then(({ data }) => { setTxs(data || []); setLoadingTxs(false); });
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const channel = supabase.channel("tx_changes")
+      .on("postgres_changes", {event:"*",schema:"public",table:"transactions"}, () => {
+        supabase.from("transactions").select("*").order("date",{ascending:false}).then(({data})=>setTxs(data||[]));
+      }).subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [session]);
+
+  useEffect(() => { chatEnd.current?.scrollIntoView({behavior:"smooth"}); }, [chatLog]);
+
+  const signOut = async () => { await supabase.auth.signOut(); setTxs([]); setPage("home"); };
+
+  const income  = txs.filter(t=>t.type==="in"&&t.cat==="Receita").reduce((a,t)=>a+Number(t.value),0);
+  const expense = txs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const balance = income - expense;
+  const savPct  = income>0 ? (balance/income*100) : 0;
+  const catData = CAT_LIST.filter(c=>c!=="Receita").map(c=>({
+    label:c,...CATS[c], val:txs.filter(t=>t.cat===c&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0)
+  })).filter(d=>d.val>0).sort((a,b)=>b.val-a.val);
+
+  const saveTx = async (tx) => {
+    const { data, error } = await supabase.from("transactions").insert([tx]).select().single();
+    if (!error && data) setTxs(p => [data, ...p]);
+  };
+
+  const handleFiles = useCallback(async (e) => {
+    const files = Array.from(e.target.files||[]);
+    setImporting(true);
+    for (const file of files) {
+      const text = await file.text();
+      const name = file.name.toLowerCase();
+      let parsed = [];
+      if (name.endsWith(".ofx")||text.includes("<STMTTRN>")) {
+        parsed = parseOFX(text);
+        setImportLog(p=>[`✅ ${file.name}: ${parsed.length} transações`,...p]);
+      } else if (name.endsWith(".csv")) {
+        parsed = parseCSV(text);
+        setImportLog(p=>[`✅ ${file.name}: ${parsed.length} transações`,...p]);
+      } else if (name.endsWith(".pdf")||name.endsWith(".txt")) {
+        setImportLog(p=>[`⏳ ${file.name}: processando com IA...`,...p]);
+        parsed = await parsePDFWithAI(text);
+        setImportLog(p=>{const n=[...p];n[0]=`✅ ${file.name}: ${parsed.length} transações (IA)`;return n;});
+      } else {
+        setImportLog(p=>[`⚠️ ${file.name}: formato não suportado`,...p]);
+      }
+      if (parsed.length) {
+        const { data } = await supabase.from("transactions").insert(parsed).select();
+        if (data) setTxs(p => [...data, ...p]);
+      }
+    }
+    setImporting(false); e.target.value="";
+  }, []);
+
+  const addTx = async () => {
+    const v = parseFloat(form.value);
+    if (!form.descricao||isNaN(v)||v<=0) return;
+    setSavingTx(true);
+    await saveTx({ date:form.date, descricao:form.descricao, cat:form.cat, value:form.type==="out"?-v:v, type:form.type, src:"manual" });
+    setForm(f=>({...f,descricao:"",value:""}));
+    setSavingTx(false);
+  };
+
+  const deleteTx = async (id) => {
+    await supabase.from("transactions").delete().eq("id", id);
+    setTxs(p => p.filter(t => t.id !== id));
+  };
+
+  const sendChat = async () => {
+    const msg = chatIn.trim(); if (!msg||chatBusy) return;
+    const KEY = process.env.REACT_APP_ANTHROPIC_KEY;
+    const summary = txs.slice(0,25).map(t=>`${t.date}|${t.descricao}|${t.cat}|R$${Math.abs(Number(t.value)).toFixed(2)}(${t.type==="in"?"entrada":"saída"})`).join("\n");
+    const history = [...chatLog, {role:"user",content:msg}];
+    setChatLog(history); setChatIn(""); setChatBusy(true);
+    try {
+      const system = `Você é a Finn, assistente financeira de um casal no WhatsApp. Seja concisa e amigável, use emojis com moderação, responda em português.
+Dados: Receitas R$${income.toFixed(2)}, Despesas R$${expense.toFixed(2)}, Saldo R$${balance.toFixed(2)}, Poupança ${savPct.toFixed(1)}%
+Transações:\n${summary}
+Para registrar transação, confirme e inclua no final: <<<{"descricao":"...","value":0,"cat":"...","type":"in|out","date":"YYYY-MM-DD"}>>>`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body: JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,system,messages:history.map(m=>({role:m.role,content:m.content}))})
+      });
+      const data = await res.json();
+      let reply = data.content?.map(b=>b.text||"").join("")||"Erro.";
+      const jm = reply.match(/<<<({.*?})>>>/s);
+      if (jm) {
+        try {
+          const o = JSON.parse(jm[1]); const v = parseFloat(o.value)||0;
+          await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual"});
+          reply = reply.replace(/<<<{.*?}>>>/s,"").trim();
+        } catch {}
+      }
+      setChatLog(p=>[...p,{role:"assistant",content:reply}]);
+    } catch { setChatLog(p=>[...p,{role:"assistant",content:"❌ Erro de conexão."}]); }
+    setChatBusy(false);
+  };
+
+  const shown = filterSrc==="all" ? txs : txs.filter(t=>t.src===filterSrc);
+  const card  = {background:T.card,borderRadius:16,padding:16,boxShadow:T.shadow,border:`1px solid ${T.border}`,marginBottom:12};
+  const inp   = {width:"100%",padding:"12px 14px",border:`1.5px solid ${T.border}`,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:T.bg};
+  const lbl   = {fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
+  const NAV   = [{id:"home",icon:"📊",label:"Início"},{id:"txns",icon:"📋",label:"Extrato"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
+
+  if (!authReady) return <div style={{minHeight:"100vh",background:T.dark,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontFamily:F,fontSize:16}}>Carregando...</div>;
+  if (!session)   return <LoginScreen />;
+
+  return (
+    <div style={{fontFamily:F,background:T.bg,color:T.dark,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative",paddingBottom:76}}>
+
+      {/* Top bar */}
+      <div style={{background:T.dark,padding:"14px 18px",position:"sticky",top:0,zIndex:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>finn<span style={{color:T.accent}}>.</span></div>
+            <div style={{fontSize:11,color:"#8b93b0",marginTop:1}}>{session.user.email}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,color:"#8b93b0",marginBottom:1}}>saldo</div>
+              <div style={{fontSize:17,fontWeight:800,color:balance>=0?T.green:T.red,fontFamily:M}}>R$ {Math.abs(balance).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+            </div>
+            <button onClick={signOut} style={{background:"#ffffff18",border:"none",color:"#8b93b0",borderRadius:8,padding:"6px 10px",fontFamily:F,fontSize:12,cursor:"pointer"}}>Sair</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{padding:"14px 14px 0"}}>
+
+        {/* HOME */}
+        {page==="home" && <>
+          {loadingTxs && <div style={{textAlign:"center",padding:32,color:T.sub,fontSize:14}}>Carregando...</div>}
+          {!loadingTxs && <>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+              {[{label:"Receitas",val:income,color:T.green,ico:"💰"},{label:"Despesas",val:expense,color:T.red,ico:"💸"}].map(s=>(
+                <div key={s.label} style={{...card,marginBottom:0,padding:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <span style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.6}}>{s.label}</span>
+                    <span style={{fontSize:18}}>{s.ico}</span>
+                  </div>
+                  <div style={{fontSize:17,fontWeight:800,color:s.color,fontFamily:M}}>R$ {s.val.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{...card,padding:14,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{fontSize:13,fontWeight:700}}>🐷 Taxa de Poupança</span>
+                <span style={{fontSize:16,fontWeight:800,color:savPct>=20?T.green:savPct>=10?T.yellow:T.red,fontFamily:M}}>{savPct.toFixed(1)}%</span>
+              </div>
+              <div style={{height:8,background:T.border,borderRadius:99}}>
+                <div style={{height:"100%",width:`${Math.min(100,Math.max(0,savPct))}%`,background:savPct>=20?T.green:savPct>=10?T.yellow:T.red,borderRadius:99,transition:"width .6s"}}/>
+              </div>
+            </div>
+            {catData.length>0&&<div style={card}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>Gastos por categoria</div>
+              <div style={{display:"flex",alignItems:"center",gap:16}}>
+                <Donut segs={catData.slice(0,5).map(d=>({val:d.val,color:d.color}))} size={80}/>
+                <div style={{flex:1}}>
+                  {catData.slice(0,5).map(d=>(
+                    <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                      <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
+                      <span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span>
+                      <span style={{fontSize:12,fontWeight:700,fontFamily:M}}>R${d.val.toFixed(0)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>}
+            <div style={card}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span>
+                <button onClick={()=>setPage("txns")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver todas</button>
+              </div>
+              {txs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação ainda.<br/>Importe um extrato ou lance manualmente!</div>}
+              {txs.slice(0,6).map((t,i)=>(
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?`1px solid ${T.border}`:"none"}}>
+                  <div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
+                    <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} · {t.cat}</div>
+                  </div>
+                  <span style={{fontSize:14,fontWeight:700,color:t.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"−"}R${Math.abs(Number(t.value)).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </>}
+        </>}
+
+        {/* EXTRATO */}
+        {page==="txns" && <>
+          <div style={{fontWeight:800,fontSize:18,marginBottom:12}}>Extrato <span style={{fontSize:13,fontWeight:500,color:T.sub}}>({shown.length})</span></div>
+          <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:4}}>
+            {["all","manual","OFX","CSV","PDF"].map(f=>(
+              <button key={f} onClick={()=>setFilterSrc(f)} style={{padding:"6px 14px",borderRadius:99,border:`1.5px solid ${filterSrc===f?T.accent:T.border}`,background:filterSrc===f?T.accentLt:"transparent",color:filterSrc===f?T.accent:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{f==="all"?"Todos":f}</button>
+            ))}
+          </div>
+          <div style={card}>
+            {shown.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação encontrada.</div>}
+            {shown.map((t,i)=>(
+              <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderTop:i>0?`1px solid ${T.border}`:"none"}}>
+                <div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
+                  <div style={{fontSize:11,color:T.sub,marginTop:1,display:"flex",alignItems:"center",gap:5}}>{t.date} · <SrcBadge src={t.src}/></div>
+                </div>
+                <span style={{fontSize:13,fontWeight:700,color:t.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"−"}R${Math.abs(Number(t.value)).toFixed(2)}</span>
+                <button onClick={()=>deleteTx(t.id)} style={{background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:18,padding:"0 2px",lineHeight:1,flexShrink:0}}>×</button>
+              </div>
+            ))}
+          </div>
+        </>}
+
+        {/* LANÇAR */}
+        {page==="add" && <>
+          <div style={{fontWeight:800,fontSize:18,marginBottom:16}}>Novo Lançamento</div>
+          <div style={{display:"flex",background:"#e8eaf2",borderRadius:12,padding:4,marginBottom:16}}>
+            {[["out","💸 Despesa",T.red],["in","💰 Receita",T.green]].map(([v,l,c])=>(
+              <button key={v} onClick={()=>setForm(f=>({...f,type:v,cat:v==="in"?"Receita":"Alimentação"}))} style={{flex:1,padding:"11px",border:"none",borderRadius:9,background:form.type===v?T.card:"transparent",color:form.type===v?c:T.sub,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:form.type===v?T.shadow:"none",transition:"all .2s"}}>{l}</button>
+            ))}
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={lbl}>Descrição</label>
+            <input style={inp} placeholder="Ex: Supermercado, Salário..." value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            <div>
+              <label style={lbl}>Valor (R$)</label>
+              <input type="number" style={inp} placeholder="0,00" value={form.value} onChange={e=>setForm(f=>({...f,value:e.target.value}))}/>
+            </div>
+            <div>
+              <label style={lbl}>Data</label>
+              <input type="date" style={inp} value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
+            </div>
+          </div>
+          <div style={{marginBottom:18}}>
+            <label style={lbl}>Categoria</label>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {CAT_LIST.filter(c=>form.type==="in"?c==="Receita":c!=="Receita").map(c=>(
+                <button key={c} onClick={()=>setForm(f=>({...f,cat:c}))} style={{padding:"7px 13px",borderRadius:99,border:`1.5px solid ${form.cat===c?CATS[c].color:T.border}`,background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:13,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>
+              ))}
+            </div>
+          </div>
+          <button onClick={addTx} disabled={savingTx} style={{width:"100%",padding:"15px",background:form.type==="out"?T.red:T.green,color:"#fff",border:"none",borderRadius:14,fontFamily:F,fontSize:16,fontWeight:700,cursor:"pointer",opacity:savingTx?.7:1}}>
+            {savingTx?"Salvando...":(form.type==="out"?"Registrar Despesa":"Registrar Receita")}
+          </button>
+        </>}
+
+        {/* IMPORTAR */}
+        {page==="import" && <>
+          <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>Importar Extrato</div>
+          <p style={{color:T.sub,fontSize:13,margin:"0 0 14px"}}>OFX · CSV · PDF via IA · salvo automaticamente</p>
+          <div onClick={()=>!importing&&fileRef.current?.click()} style={{border:`2px dashed ${importing?T.accent:T.border}`,borderRadius:16,padding:36,textAlign:"center",cursor:importing?"default":"pointer",background:T.card,marginBottom:14}}>
+            <div style={{fontSize:40,marginBottom:10}}>{importing?"⏳":"📤"}</div>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>{importing?"Processando...":"Toque para selecionar"}</div>
+            <div style={{fontSize:12,color:T.sub}}>.ofx · .csv · .pdf</div>
+            <input ref={fileRef} type="file" accept=".ofx,.csv,.pdf,.txt" multiple style={{display:"none"}} onChange={handleFiles}/>
+          </div>
+          <div style={card}>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Bancos suportados</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {["Bradesco","Itaú","BB","Santander","Nubank","Inter","C6 Bank","BTG","XP"].map(b=>(
+                <span key={b} style={{padding:"5px 11px",borderRadius:99,background:T.bg,border:`1px solid ${T.border}`,fontSize:12,color:T.sub}}>{b}</span>
+              ))}
+            </div>
+            <div style={{marginTop:12,padding:"10px 12px",background:T.yellowLt,borderRadius:10,fontSize:12,color:"#8a6a00"}}>
+              🤖 <strong>PDF via IA</strong> — qualquer extrato é interpretado automaticamente
+            </div>
+          </div>
+          {importLog.length>0&&<div style={card}>
+            <div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Log</div>
+            {importLog.map((l,i)=><div key={i} style={{fontSize:13,padding:"4px 0",color:l.startsWith("✅")?T.green:l.startsWith("⏳")?T.yellow:T.red,fontFamily:M}}>{l}</div>)}
+          </div>}
+        </>}
+
+        {/* FINN IA */}
+        {page==="chat" && <>
+          <div style={{background:T.dark,borderRadius:"16px 16px 0 0",padding:"13px 16px",display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:38,height:38,borderRadius:99,background:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🤖</div>
+            <div>
+              <div style={{color:"#fff",fontWeight:700,fontSize:14}}>Finn</div>
+              <div style={{color:"#8b93b0",fontSize:11,display:"flex",alignItems:"center",gap:4}}>
+                <div style={{width:6,height:6,borderRadius:99,background:T.green}}/>online · {txs.length} transações
+              </div>
+            </div>
+          </div>
+          <div style={{background:"#e5ddd5",padding:"14px 12px",display:"flex",flexDirection:"column",gap:4,height:340,overflowY:"auto",borderLeft:`1px solid ${T.border}`,borderRight:`1px solid ${T.border}`}}>
+            {chatLog.map((m,i)=><WaBubble key={i} msg={m}/>)}
+            {chatBusy&&<div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:26,height:26,borderRadius:99,background:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>🤖</div>
+              <div style={{background:T.surface,padding:"9px 13px",borderRadius:"4px 16px 16px 16px",boxShadow:T.shadow}}>
+                <div style={{display:"flex",gap:4}}>{[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:99,background:T.sub,animation:`bounce .9s ${i*.2}s infinite`}}/>)}</div>
+              </div>
+            </div>}
+            <div ref={chatEnd}/>
+          </div>
+          <div style={{background:"#ece5dd",padding:"8px 12px",overflowX:"auto",display:"flex",gap:8,borderLeft:`1px solid ${T.border}`,borderRight:`1px solid ${T.border}`}}>
+            {["Nossos gastos","Maior despesa","Registrar R$50 almoço","Dicas poupança"].map(q=>(
+              <button key={q} onClick={()=>setChatIn(q)} style={{padding:"5px 12px",borderRadius:99,border:`1px solid ${T.border}`,background:T.surface,color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F,flexShrink:0,whiteSpace:"nowrap"}}>{q}</button>
+            ))}
+          </div>
+          <div style={{background:"#ece5dd",borderRadius:"0 0 16px 16px",padding:"10px 12px",display:"flex",gap:8,alignItems:"center",borderLeft:`1px solid ${T.border}`,borderRight:`1px solid ${T.border}`,borderBottom:`1px solid ${T.border}`}}>
+            <input value={chatIn} onChange={e=>setChatIn(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendChat()} placeholder="Mensagem..." disabled={chatBusy}
+              style={{flex:1,padding:"11px 15px",border:"none",borderRadius:99,fontFamily:F,fontSize:14,outline:"none",background:T.surface,color:T.dark}}/>
+            <button onClick={sendChat} disabled={chatBusy} style={{width:42,height:42,borderRadius:99,background:chatBusy?T.border:T.accent,border:"none",color:"#fff",fontSize:18,cursor:chatBusy?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>➤</button>
+          </div>
+          <p style={{textAlign:"center",fontSize:11,color:T.sub,marginTop:10}}>💡 Diga "registrar R$ 50 uber" e a Finn lança automaticamente</p>
+        </>}
+
+      </div>
+
+      {/* Bottom nav */}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:`1px solid ${T.border}`,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
+        {NAV.map(n=>(
+          <button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}>
+            <span style={{fontSize:20,lineHeight:1}}>{n.icon}</span>
+            <span style={{fontSize:10,fontWeight:page===n.id?700:500,letterSpacing:.2}}>{n.label}</span>
+            {page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}
+          </button>
+        ))}
+      </div>
+
+      <style>{`
+        *{box-sizing:border-box;}body{margin:0;}
+        @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}}
+        ::-webkit-scrollbar{width:3px;height:3px}
+        ::-webkit-scrollbar-thumb{background:${T.border};border-radius:99px}
+      `}</style>
+    </div>
+  );
+}
