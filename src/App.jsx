@@ -320,9 +320,11 @@ export default function App() {
   const [importing,setImporting]=useState(false);const [recatLoading,setRecatLoading]=useState(false);
   // Extrato filters
   const [filterSrc,setFilterSrc]=useState("all");const [filterConta,setFilterConta]=useState("all");
-  const [filterTipo,setFilterTipo]=useState("all"); // all | in | out
+  const [filterTipo,setFilterTipo]=useState("all");
   const [filterUser,setFilterUser]=useState("all");
-  const [filterPeriodStart,setFilterPeriodStart]=useState("");const [filterPeriodEnd,setFilterPeriodEnd]=useState("");
+  const [filterCat,setFilterCat]=useState("all");
+  const [filterMesVenc,setFilterMesVenc]=useState("all");
+  const [filterDataCompra,setFilterDataCompra]=useState("all");
   const [savingTx,setSavingTx]=useState(false);const [resumo,setResumo]=useState(null);const [resumoLoading,setResumoLoading]=useState(false);
   const [importLog,setImportLog]=useState([]);const [showCashFlow,setShowCashFlow]=useState(false);
   const chatEnd=useRef(null);const fileRef=useRef(null);const recognitionRef=useRef(null);
@@ -381,9 +383,10 @@ export default function App() {
     const contaOk=filterConta==="all"||t.conta===filterConta;
     const tipoOk=filterTipo==="all"||t.type===filterTipo;
     const userOk=filterUser==="all"||(t.user_email||"")===(filterUser==="me"?session?.user?.email:"");
-    const startOk=!filterPeriodStart||t.date>=filterPeriodStart;
-    const endOk=!filterPeriodEnd||t.date<=filterPeriodEnd;
-    return srcOk&&contaOk&&tipoOk&&userOk&&startOk&&endOk;
+    const catOk=filterCat==="all"||t.cat===filterCat;
+    const mesVencOk=filterMesVenc==="all"||(t.fatura_mes||t.date?.slice(0,7)||"")===(filterMesVenc);
+    const dataCompraOk=filterDataCompra==="all"||(t.data_compra||t.date||"").startsWith(filterDataCompra);
+    return srcOk&&contaOk&&tipoOk&&userOk&&catOk&&mesVencOk&&dataCompraOk;
   });
 
   // Unique users from txs
@@ -574,28 +577,38 @@ export default function App() {
               <option value="in">💰 Só receitas</option>
               <option value="out">💸 Só despesas</option>
             </select>
+            <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
+              <option value="all">📂 Todas as categorias</option>
+              {CAT_LIST.map(c=><option key={c} value={c}>{CATS[c].icon} {c}</option>)}
+            </select>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <select value={filterConta} onChange={e=>setFilterConta(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
               <option value="all">🏦 Todas as contas</option>
               {accounts.filter(a=>a.ativo).map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}
             </select>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-            <select value={filterSrc} onChange={e=>setFilterSrc(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
-              <option value="all">Todas as fontes</option>
-              {["manual","OFX","CSV","PDF","modelo"].map(s=><option key={s} value={s}>{s}</option>)}
-            </select>
             <select value={filterUser} onChange={e=>setFilterUser(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
-              <option value="all">👥 Todos os usuários</option>
-              <option value="me">👤 Meus lançamentos</option>
+              <option value="all">👥 Todos</option>
+              <option value="me">👤 Meus</option>
               {uniqueUsers.filter(u=>u!==session?.user?.email).map(u=><option key={u} value={u}>👤 {u.split("@")[0]}</option>)}
             </select>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div><label style={{...lbl,marginBottom:4}}>De</label><input type="date" value={filterPeriodStart} onChange={e=>setFilterPeriodStart(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",boxSizing:"border-box"}}/></div>
-            <div><label style={{...lbl,marginBottom:4}}>Até</label><input type="date" value={filterPeriodEnd} onChange={e=>setFilterPeriodEnd(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",boxSizing:"border-box"}}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <select value={filterMesVenc} onChange={e=>setFilterMesVenc(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
+              <option value="all">📅 Mês vencimento</option>
+              {[...new Set(txs.map(t=>t.fatura_mes||t.date?.slice(0,7)).filter(Boolean))].sort().reverse().map(m=>{const[y,mo]=m.split("-").map(Number);return<option key={m} value={m}>{MONTHS_PT[mo-1]} {y}</option>;})}
+            </select>
+            <select value={filterDataCompra} onChange={e=>setFilterDataCompra(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
+              <option value="all">🛒 Mês da compra</option>
+              {[...new Set(txs.map(t=>(t.data_compra||t.date)?.slice(0,7)).filter(Boolean))].sort().reverse().map(m=>{const[y,mo]=m.split("-").map(Number);return<option key={m} value={m}>{MONTHS_PT[mo-1]} {y}</option>;})}
+            </select>
           </div>
-          {(filterTipo!=="all"||filterConta!=="all"||filterSrc!=="all"||filterUser!=="all"||filterPeriodStart||filterPeriodEnd)&&
-            <button onClick={()=>{setFilterTipo("all");setFilterConta("all");setFilterSrc("all");setFilterUser("all");setFilterPeriodStart("");setFilterPeriodEnd("");}} style={{marginTop:10,width:"100%",padding:"8px",background:T.redLt,border:"none",borderRadius:8,color:T.red,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Limpar filtros</button>}
+          <select value={filterSrc} onChange={e=>setFilterSrc(e.target.value)} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:12,outline:"none",background:T.surface,color:T.dark}}>
+            <option value="all">Todas as fontes</option>
+            {["manual","OFX","CSV","PDF","modelo"].map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+          {(filterTipo!=="all"||filterConta!=="all"||filterSrc!=="all"||filterUser!=="all"||filterCat!=="all"||filterMesVenc!=="all"||filterDataCompra!=="all")&&
+            <button onClick={()=>{setFilterTipo("all");setFilterConta("all");setFilterSrc("all");setFilterUser("all");setFilterCat("all");setFilterMesVenc("all");setFilterDataCompra("all");}} style={{marginTop:10,width:"100%",padding:"8px",background:T.redLt,border:"none",borderRadius:8,color:T.red,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Limpar filtros</button>}
         </div>
 
         <div style={card}>
