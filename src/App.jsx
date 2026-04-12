@@ -66,16 +66,32 @@ function addMonthsToYearMonth(ym, n) {
 }
 
 function parseOFX(text) {
+  const isCreditCard = text.includes("<CREDITCARDMSGSRSV1>") || text.includes("CREDITCARD");
   const blocks = text.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi)||[];
   return blocks.map(b=>{
     const get=tag=>{const m=b.match(new RegExp("<"+tag+">([^<\n\r]+)","i"));return m?m[1].trim():"";};
     const raw=get("DTPOSTED");
     const date=raw.length>=8?raw.slice(0,4)+"-"+raw.slice(4,6)+"-"+raw.slice(6,8):new Date().toISOString().slice(0,10);
     const amt=parseFloat(get("TRNAMT")||"0");
+    const trnType=get("TRNTYPE").toUpperCase();
     const desc=get("MEMO")||get("NAME")||"Transação";
     const transf=isTransfer(desc);
-    return{date,descricao:desc,cat:transf?"Transferência":(amt>=0?"Outras Receitas":"Outros"),value:amt,type:transf?"transfer":(amt>=0?"in":"out"),src:"OFX",conta:"",status:"efetivado"};
-  });
+    if(transf)return{date,descricao:desc,cat:"Transferência",value:amt,type:"transfer",src:"OFX",conta:"",status:"efetivado"};
+    // Credit card: DEBIT=compra(negativo), CREDIT=estorno(positivo vira abatimento de despesa)
+    if(isCreditCard){
+      if(amt>0){
+        // Estorno - reduz despesa (entra como valor negativo de despesa)
+        const isEstorno=desc.toLowerCase().includes("estorno")||trnType==="CREDIT";
+        return{date,descricao:desc,cat:"Outros",value:-amt,type:"out",src:"OFX",conta:"",status:"pendente",isEstorno:true};
+      }
+      const inst=parseInstallment(desc);
+      return{date,descricao:desc,cat:"Outros",value:amt,type:"out",src:"OFX",conta:"",status:"pendente",
+        parcela_atual:inst?.atual||null,total_parcelas:inst?.total||null,
+        grupo_parcela:inst?desc.replace(/\s*[-–]\s*[Pp]arcela.*/,"").replace(/\s*\d+\/\d+/,"").trim():""};
+    }
+    // Conta corrente: positivo=receita, negativo=despesa
+    return{date,descricao:desc,cat:amt>=0?"Outras Receitas":"Outros",value:amt,type:amt>=0?"in":"out",src:"OFX",conta:"",status:"efetivado"};
+  }).filter(Boolean);
 }
 
 function parseCSV(text) {
@@ -196,7 +212,7 @@ async function aiCall(messages,system,maxTokens=800) {
 }
 
 async function categorizarComIA(transactions) {
-  // Skip transfers - they're already correctly classified
+  // Skip transfers and preserve installment info
   transactions = transactions.map(t => isTransfer(t.descricao)?{...t,cat:"Transferência",type:"transfer"}:t);
   const lista=transactions.map((t,i)=>i+"|"+t.descricao+"|"+Math.abs(t.value)).join("\n");
   const reply=await aiCall([{role:"user",content:"Classifique cada transação em uma das categorias: "+CAT_LIST.join(", ")+".\nRetorne APENAS JSON array: [{\"i\":0,\"cat\":\"Categoria\"}]\nTransações:\n"+lista}],"Classificador financeiro. Responda apenas com JSON.",1500);
