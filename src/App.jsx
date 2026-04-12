@@ -320,11 +320,49 @@ function LoginScreen() {
 }
 
 // ── Accounts page ──
-function AccountsPage({accounts,setAccounts}) {
+function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
   const [editAcc,setEditAcc]=useState(null);
   const [saving,setSaving]=useState(false);
-  const TIPO_COLORS={CC:T.accent,credito:T.red,investimento:T.green};
+  const [pagarFatura,setPagarFatura]=useState(null); // {conta, mes, total}
+  const [contaDebito,setContaDebito]=useState("");
+  const [pagando,setPagando]=useState(false);
   const TIPO_ICONS={CC:"🏦",credito:"💳",investimento:"📈"};
+  const MONTHS_PT2=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+  // Group pending transactions by cartão + fatura_mes
+  const faturasPendentes = accounts.filter(a=>a.tipo==="credito"&&a.ativo).flatMap(acc=>{
+    const pendentes = txs.filter(t=>t.conta===acc.nome&&t.status==="pendente"&&t.type==="out");
+    const grupos = {};
+    pendentes.forEach(t=>{
+      const mes = t.fatura_mes||t.date?.slice(0,7)||"";
+      if(!grupos[mes]) grupos[mes]={mes,total:0,ids:[]};
+      grupos[mes].total+=Math.abs(Number(t.value));
+      grupos[mes].ids.push(t.id);
+    });
+    return Object.values(grupos).map(g=>({...g,conta:acc}));
+  });
+
+  const handlePagarFatura=async()=>{
+    if(!contaDebito||!pagarFatura)return;
+    setPagando(true);
+    // 1. Efetiva todas as transações pendentes dessa fatura
+    for(const id of pagarFatura.ids){
+      await supabase.from("transactions").update({status:"efetivado"}).eq("id",id);
+    }
+    // 2. Lança débito na conta corrente
+    const [y,m]=pagarFatura.mes.split("-").map(Number);
+    const mesLabel=MONTHS_PT2[m-1]+" "+y;
+    await saveTx({
+      date:new Date().toISOString().slice(0,10),
+      descricao:"Pagamento fatura "+pagarFatura.conta.nome+" - "+mesLabel,
+      cat:"Outros",value:-pagarFatura.total,type:"out",
+      src:"manual",conta:contaDebito,status:"efetivado",fatura_mes:""
+    });
+    // 3. Reload transactions
+    const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});
+    if(data)setTxs(data);
+    setPagando(false);setPagarFatura(null);setContaDebito("");
+  };
 
   const saveAccount=async(acc)=>{
     setSaving(true);
@@ -390,6 +428,61 @@ function AccountsPage({accounts,setAccounts}) {
           </div>
         );
       })}
+
+      {/* Faturas pendentes */}
+      {faturasPendentes.length>0&&<div style={{marginBottom:16}}>
+        <div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>
+          ⏳ Faturas pendentes de pagamento
+        </div>
+        {faturasPendentes.map((f,i)=>{
+          const[y,m]=f.mes.split("-").map(Number);
+          const mesLabel=MONTHS_PT2[m-1]+" "+y;
+          return(
+            <div key={i} style={{background:T.yellowLt,borderRadius:14,padding:16,marginBottom:8,border:"1px solid #f5b54444"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>{f.conta.nome}</div>
+                  <div style={{fontSize:11,color:"#c2880a",marginTop:2}}>Fatura {mesLabel} · {f.ids.length} lançamentos</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:16,fontWeight:800,color:"#c2880a",fontFamily:M}}>R${f.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+                  <button onClick={()=>{setPagarFatura(f);setContaDebito("");}} style={{marginTop:6,padding:"6px 12px",background:"#c2880a",color:"#fff",border:"none",borderRadius:8,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    Pagar fatura →
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>}
+
+      {pagarFatura&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+        <div style={{background:T.surface,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:430}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <span style={{fontSize:16,fontWeight:800}}>Pagar Fatura</span>
+            <button onClick={()=>setPagarFatura(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub}}>x</button>
+          </div>
+          <div style={{background:T.yellowLt,borderRadius:10,padding:"12px 14px",marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>{pagarFatura.conta.nome}</div>
+            <div style={{fontSize:12,color:"#c2880a",marginTop:2}}>Fatura {pagarFatura.mes} · {pagarFatura.ids.length} lançamentos</div>
+            <div style={{fontSize:20,fontWeight:800,color:"#c2880a",marginTop:4,fontFamily:M}}>R${pagarFatura.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+          </div>
+          <div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8,textTransform:"uppercase",letterSpacing:.6}}>Debitar de qual conta?</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+            {accounts.filter(a=>a.tipo==="CC"&&a.ativo).map(a=>(
+              <button key={a.id} onClick={()=>setContaDebito(a.nome)} style={{padding:"12px 16px",borderRadius:10,border:"2px solid "+(contaDebito===a.nome?T.accent:T.border),background:contaDebito===a.nome?T.accentLt:T.surface,color:contaDebito===a.nome?T.accent:T.dark,fontFamily:F,fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"left"}}>
+                🏦 {a.nome}
+              </button>
+            ))}
+          </div>
+          <button onClick={handlePagarFatura} disabled={!contaDebito||pagando} style={{width:"100%",padding:"14px",background:contaDebito?T.green:"#ccc",color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:contaDebito?"pointer":"default",opacity:pagando?0.7:1}}>
+            {pagando?"Processando...":"✅ Confirmar pagamento"}
+          </button>
+          <div style={{fontSize:11,color:T.sub,textAlign:"center",marginTop:10}}>
+            Efetiva todos os lançamentos e lança o débito na conta selecionada
+          </div>
+        </div>
+      </div>}
 
       {editAcc&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
@@ -458,6 +551,7 @@ export default function App() {
   const [importStep,setImportStep]     = useState("idle"); // idle | select_account | preview | importing
   const [importFiles,setImportFiles]   = useState([]);
   const [importAccount,setImportAccount] = useState("");
+  const [importFaturaMes,setImportFaturaMes] = useState("");
   const [importPreview,setImportPreview] = useState([]); // {tx, isDuplicate, duplicateOf, selected}
   const [filterSrc,setFilterSrc]     = useState("all");
   const [filterConta,setFilterConta] = useState("all");
@@ -589,7 +683,15 @@ export default function App() {
     // Credit card imports are pendente by default; CC and receitas are efetivado
     const selAcc=accounts.find(a=>a.nome===importAccount);
     const isCreditCard=selAcc?.tipo==="credito";
-    const toInsert=toImport.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({date,data_compra:data_compra||null,descricao,cat,value,type,src:src||"extrato",conta:conta||"",status:isCreditCard&&type==="out"?"pendente":(status||"efetivado")}));
+    const toInsert=toImport.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({
+        date: isCreditCard&&importFaturaMes?(importFaturaMes+"-05"):date,
+        data_compra: isCreditCard?date:null,
+        descricao,cat,value,type,
+        src:src||"extrato",
+        conta:conta||"",
+        status:isCreditCard&&type==="out"?"pendente":(status||"efetivado"),
+        fatura_mes:isCreditCard&&importFaturaMes?importFaturaMes:""
+      }));
     let inserted=0;
     for(let i=0;i<toInsert.length;i+=50){const{data}=await supabase.from("transactions").insert(toInsert.slice(i,i+50)).select();if(data){setTxs(p=>[...data,...p]);inserted+=data.length;}}
     setImportLog(p=>[inserted+" transações importadas com sucesso!",...p]);
@@ -851,7 +953,7 @@ export default function App() {
             <button onClick={()=>setPage("extrato")} style={{flex:1,padding:"10px",borderRadius:10,border:"1.5px solid "+T.border,background:T.surface,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",color:T.dark}}>📋 Extrato</button>
             <button onClick={()=>setPage("accounts")} style={{flex:1,padding:"10px",borderRadius:10,border:"1.5px solid "+T.accent,background:T.accentLt,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",color:T.accent}}>🏦 Contas</button>
           </div>
-          <AccountsPage accounts={accounts} setAccounts={setAccounts}/>
+          <AccountsPage accounts={accounts} setAccounts={setAccounts} txs={txs} setTxs={setTxs} saveTx={saveTx}/>
         </>}
 
         {page==="extrato"&&<>
@@ -973,9 +1075,18 @@ export default function App() {
                 Não vincular a nenhuma conta
               </button>
             </div>
+            {/* Fatura mes - only for credit cards */}
+            {accounts.find(a=>a.nome===importAccount)?.tipo==="credito"&&<div style={{marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:8,color:T.dark}}>📅 Mês de vencimento da fatura</div>
+              <div style={{fontSize:12,color:T.sub,marginBottom:8}}>Todas as transações serão agrupadas neste mês, independente da data da compra.</div>
+              <select value={importFaturaMes} onChange={e=>setImportFaturaMes(e.target.value)} style={{width:"100%",padding:"11px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:14,outline:"none",background:"#fff",color:T.dark}}>
+                <option value="">-- Selecione o mês da fatura --</option>
+                {Array.from({length:6},(_,i)=>{const d=new Date();d.setMonth(d.getMonth()+i-1);const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,"0");const label=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][d.getMonth()]+" "+y;return <option key={m} value={y+"-"+m}>{label}</option>;}).concat(Array.from({length:3},(_,i)=>{const d=new Date();d.setMonth(d.getMonth()-i-2);const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,"0");const label=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][d.getMonth()]+" "+y;return <option key={"p"+m} value={y+"-"+m}>{label}</option>;}))}
+              </select>
+            </div>}
             <div style={{display:"flex",gap:10}}>
               <button onClick={()=>setImportStep("idle")} style={{flex:1,padding:"13px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",color:T.sub}}>Cancelar</button>
-              <button onClick={()=>processImportFiles(importAccount)} style={{flex:2,padding:"13px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer"}}>Processar →</button>
+              <button onClick={()=>processImportFiles(importAccount)} disabled={accounts.find(a=>a.nome===importAccount)?.tipo==="credito"&&!importFaturaMes} style={{flex:2,padding:"13px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",opacity:(accounts.find(a=>a.nome===importAccount)?.tipo==="credito"&&!importFaturaMes)?0.4:1}}>Processar →</button>
             </div>
           </div>}
 
