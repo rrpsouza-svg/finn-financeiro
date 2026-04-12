@@ -224,8 +224,8 @@ function buildProjection(txs, budget) {
       totalRec  = realRec;
       totalDesp = efectDesp + pendDesp;
     } else if (isCurrent) {
-      // Current: receipt = real if received, else budget (not sum)
-      totalRec = realRec > 0 ? realRec : budgRec;
+      // Current: use the larger of real or budget (may still receive more)
+      totalRec = Math.max(realRec, budgRec);
       // Expense: already committed (efetivado+pendente) + budget remainder if any
       const committed = efectDesp + pendDesp;
       const budgRemainder = Math.max(0, budgDesp - committed);
@@ -572,6 +572,7 @@ export default function App() {
   const [savingTx,setSavingTx]=useState(false);const [resumo,setResumo]=useState(null);const [resumoLoading,setResumoLoading]=useState(false);
   const [importLog,setImportLog]=useState([]);const [showCashFlow,setShowCashFlow]=useState(false);
   const [budget,setBudget]=useState([]);const [showProjection,setShowProjection]=useState(false);
+  const [contasTab,setContasTab]=useState("contas");
   const chatEnd=useRef(null);const fileRef=useRef(null);const recognitionRef=useRef(null);const budgetFileRef=useRef(null);
   const hasAI=!!process.env.REACT_APP_ANTHROPIC_KEY;
 
