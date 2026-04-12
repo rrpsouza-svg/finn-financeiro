@@ -950,5 +950,3 @@ export default function App() {
     `}</style>
   </div>);
 }
-+p.totalRec.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-            <td style={{padding:'5px 8px',textAlign:'right',color:p.isPast?T.red:T.yellow,fontFamily:M}}>{'R
