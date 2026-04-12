@@ -71,12 +71,21 @@ function parseCSV(text) {
   const hdrs = lines[0].toLowerCase().split(",").map(h=>h.replace(/"/g,"").trim());
   const idx = k => hdrs.findIndex(h=>h.includes(k));
   const di = [idx("data"),idx("date")].find(x=>x>=0)??0;
-  const ni = [idx("descri"),idx("estabelec"),idx("memo"),idx("name")].find(x=>x>=0)??1;
+  const ni = [idx("descri"),idx("estabelec"),idx("memo"),idx("name"),idx("title")].find(x=>x>=0)??1;
   const vi = [idx("valor"),idx("amount"),idx("value")].find(x=>x>=0)??2;
+  // Detect Nubank format: headers are date,title,amount (positive=expense)
+  const isNubank = hdrs.includes("title") && hdrs.includes("amount");
   return lines.slice(1).map(line=>{
     const c = line.split(",").map(s=>s.replace(/"/g,"").trim());
-    const amt = parseFloat((c[vi]||"0").replace(",","."))*(hdrs[vi]?.includes("debito")?-1:1);
-    if (isNaN(amt)) return null;
+    let raw = parseFloat((c[vi]||"0").replace(",","."));
+    if (isNaN(raw)) return null;
+    // Nubank: positive=expense, negative=pagamento (skip pagamentos)
+    if (isNubank) {
+      if (raw < 0) return null; // pagamento de fatura - ignorar
+      const amt = -raw; // despesa
+      return {date:c[di]||new Date().toISOString().slice(0,10), descricao:c[ni]||"Transação", cat:"Outros", value:amt, type:"out", src:"CSV", conta:"", status:"pendente"};
+    }
+    let amt = raw*(hdrs[vi]?.includes("debito")?-1:1);
     return {date:c[di]||new Date().toISOString().slice(0,10), descricao:c[ni]||"Transação", cat:amt>=0?"Outras Receitas":"Outros", value:amt, type:amt>=0?"in":"out", src:"CSV", conta:"", status:"efetivado"};
   }).filter(Boolean);
 }
@@ -497,8 +506,11 @@ export default function App() {
   });
   const prevMonthKey=()=>{const[y,m]=selMonth.split("-").map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
   const prevTxs=txs.filter(t=>t.date?.startsWith(prevMonthKey()));
-  const income  = filteredTxs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0);
-  const expense = filteredTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  // Only efetivado transactions affect balance
+  const income  = filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
+  const expense = filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  // Pending totals (for info)
+  const pendingExpense = filteredTxs.filter(t=>t.type==="out"&&t.status==="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
   const balance = income-expense;
   const savPct  = income>0?(balance/income*100):0;
   const prevExpense=prevTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
@@ -574,7 +586,10 @@ export default function App() {
     const toImport=importPreview.filter(p=>p.selected).map(p=>p.tx);
     if(!toImport.length){setImportStep("idle");return;}
     setImporting(true);
-    const toInsert=toImport.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({date,data_compra:data_compra||null,descricao,cat,value,type,src:src||"extrato",conta:conta||"",status:status||"efetivado"}));
+    // Credit card imports are pendente by default; CC and receitas are efetivado
+    const selAcc=accounts.find(a=>a.nome===importAccount);
+    const isCreditCard=selAcc?.tipo==="credito";
+    const toInsert=toImport.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({date,data_compra:data_compra||null,descricao,cat,value,type,src:src||"extrato",conta:conta||"",status:isCreditCard&&type==="out"?"pendente":(status||"efetivado")}));
     let inserted=0;
     for(let i=0;i<toInsert.length;i+=50){const{data}=await supabase.from("transactions").insert(toInsert.slice(i,i+50)).select();if(data){setTxs(p=>[...data,...p]);inserted+=data.length;}}
     setImportLog(p=>[inserted+" transações importadas com sucesso!",...p]);
@@ -694,9 +709,11 @@ export default function App() {
             {availableMonths.map(m=>{const[y,mo]=m.split("-").map(Number);return <button key={m} onClick={()=>setSelMonth(m)} style={{padding:"6px 14px",borderRadius:99,border:"1.5px solid "+(selMonth===m?T.accent:T.border),background:selMonth===m?T.accentLt:"transparent",color:selMonth===m?T.accent:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{MONTHS_PT[mo-1].slice(0,3)} {y}</button>;})}
           </div>
 
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,overflowX:"auto",paddingBottom:2}}>
-            <button onClick={()=>setFilterConta("all")} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta==="all"?T.green:T.border),background:filterConta==="all"?T.greenLt:"transparent",color:filterConta==="all"?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Todas</button>
-            {accounts.filter(a=>a.ativo).map(a=><button key={a.id} onClick={()=>setFilterConta(filterConta===a.nome?"all":a.nome)} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta===a.nome?T.green:T.border),background:filterConta===a.nome?T.greenLt:"transparent",color:filterConta===a.nome?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{a.nome}</button>)}
+          <div style={{marginBottom:10}}>
+            <select value={filterConta} onChange={e=>setFilterConta(e.target.value)} style={{width:"100%",padding:"9px 14px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:13,outline:"none",background:T.surface,color:T.dark,cursor:"pointer"}}>
+              <option value="all">🏦 Todas as contas</option>
+              {accounts.filter(a=>a.ativo).map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}
+            </select>
           </div>
 
           {loadingTxs&&<div style={{textAlign:"center",padding:32,color:T.sub,fontSize:14}}>Carregando...</div>}
@@ -728,6 +745,16 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {pendingExpense>0&&<div style={{...card,padding:"12px 16px",background:T.yellowLt,border:"1px solid #f5b54433",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>⏳ Faturas a pagar</div>
+                  <div style={{fontSize:11,color:"#c2880a",marginTop:2}}>Não impacta o saldo até o pagamento</div>
+                </div>
+                <span style={{fontSize:16,fontWeight:800,color:"#c2880a",fontFamily:M}}>R${pendingExpense.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+              </div>
+            </div>}
 
             {/* Export button */}
             <button onClick={()=>exportToExcel(filteredTxs,selMonth)} style={{width:"100%",marginBottom:12,padding:"12px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:13,fontWeight:700,color:T.dark,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
@@ -834,9 +861,11 @@ export default function App() {
               <button key={f} onClick={()=>setFilterSrc(f)} style={{padding:"6px 14px",borderRadius:99,border:"1.5px solid "+(filterSrc===f?T.accent:T.border),background:filterSrc===f?T.accentLt:"transparent",color:filterSrc===f?T.accent:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{f==="all"?"Todos":f}</button>
             ))}
           </div>
-          <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:4}}>
-            <button onClick={()=>setFilterConta("all")} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta==="all"?T.green:T.border),background:filterConta==="all"?T.greenLt:"transparent",color:filterConta==="all"?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Todas</button>
-            {accounts.filter(a=>a.ativo).map(a=><button key={a.id} onClick={()=>setFilterConta(filterConta===a.nome?"all":a.nome)} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta===a.nome?T.green:T.border),background:filterConta===a.nome?T.greenLt:"transparent",color:filterConta===a.nome?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{a.nome}</button>)}
+          <div style={{marginBottom:12}}>
+            <select value={filterConta} onChange={e=>setFilterConta(e.target.value)} style={{width:"100%",padding:"10px 14px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:13,outline:"none",background:T.surface,color:T.dark,cursor:"pointer"}}>
+              <option value="all">🏦 Todas as contas</option>
+              {accounts.filter(a=>a.ativo).map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}
+            </select>
           </div>
           <div style={card}>
             {shown.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação encontrada.</div>}
