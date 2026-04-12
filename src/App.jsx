@@ -14,6 +14,7 @@ const F = "'Plus Jakarta Sans',sans-serif";
 const M = "'JetBrains Mono',monospace";
 
 const CATS = {
+  "Transferência":  {icon:"🔄",color:"#94a3b8"},
   Moradia:          {icon:"🏠",color:"#7c6af0"},
   "Alimentação":    {icon:"🍽️",color:"#f0884a"},
   Transporte:       {icon:"🚗",color:"#4fa3f0"},
@@ -29,7 +30,16 @@ const CATS = {
   "Outras Receitas":{icon:"💰",color:"#f5b544"},
 };
 const INCOME_CATS  = ["Receita Raphael","Receita Julia","Outras Receitas"];
-const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c));
+const TRANSFER_NAMES = ["raphael rodrigues","raphael r p souza","raphael r. p","julia","rrpsouza"]; // nomes do casal
+const isTransfer = desc => {
+  if (!desc) return false;
+  const d = desc.toLowerCase();
+  const isPixTransfer = d.includes("transferência") || d.includes("transferencia") || d.includes("pix");
+  const isOwnName = TRANSFER_NAMES.some(n => d.includes(n));
+  const isFatura = d.includes("pagamento de fatura") || d.includes("pagamento fatura");
+  return (isPixTransfer && isOwnName) || isFatura;
+};
+const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c) && c !== "Transferência");
 const CAT_LIST     = Object.keys(CATS);
 
 const DEFAULT_GOALS = {
@@ -62,7 +72,9 @@ function parseOFX(text) {
     const raw=get("DTPOSTED");
     const date=raw.length>=8?raw.slice(0,4)+"-"+raw.slice(4,6)+"-"+raw.slice(6,8):new Date().toISOString().slice(0,10);
     const amt=parseFloat(get("TRNAMT")||"0");
-    return{date,descricao:get("MEMO")||get("NAME")||"Transação",cat:amt>=0?"Outras Receitas":"Outros",value:amt,type:amt>=0?"in":"out",src:"OFX",conta:"",status:"efetivado"};
+    const desc=get("MEMO")||get("NAME")||"Transação";
+    const transf=isTransfer(desc);
+    return{date,descricao:desc,cat:transf?"Transferência":(amt>=0?"Outras Receitas":"Outros"),value:amt,type:transf?"transfer":(amt>=0?"in":"out"),src:"OFX",conta:"",status:"efetivado"};
   });
 }
 
@@ -108,6 +120,47 @@ function parseC6(text) {
   }).filter(Boolean);
 }
 
+function parseMercadoPago(text) {
+  const lines = text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
+  // Find the transaction data header line
+  const headerIdx = lines.findIndex(l=>l.includes("RELEASE_DATE")&&l.includes("TRANSACTION_TYPE"));
+  if(headerIdx<0) return [];
+  const parseDate = s => {
+    if(!s)return new Date().toISOString().slice(0,10);
+    // DD-MM-YYYY
+    const p=s.trim().split("-");
+    if(p.length===3&&p[2].length===4)return p[2]+"-"+p[1].padStart(2,"0")+"-"+p[0].padStart(2,"0");
+    return new Date().toISOString().slice(0,10);
+  };
+  const parseVal = s => {
+    if(!s)return 0;
+    // Remove dots (thousand sep) and replace comma with dot
+    return parseFloat(s.trim().replace(/\./g,"").replace(",","."));
+  };
+  const SKIP_TYPES = ["rendimentos","dinheiro retirado","pagamento cartão","pagamento de cartão"];
+  const isSkip = t => SKIP_TYPES.some(s=>t.toLowerCase().includes(s));
+  return lines.slice(headerIdx+1).map(line=>{
+    const c=line.split(";").map(s=>s.replace(/"/g,"").trim());
+    if(c.length<4||!c[0])return null;
+    const tipo=c[1]||"";
+    const valor=parseVal(c[3]);
+    if(isNaN(valor)||valor===0)return null;
+    // Skip internal transfers (rendimentos, retiradas internas, pagamento fatura)
+    if(isSkip(tipo))return null;
+    // Skip own-name PIX transfers
+    if(isTransfer(tipo))return null;
+    const isRec=valor>0;
+    return{
+      date:parseDate(c[0]),
+      descricao:tipo,
+      cat:isRec?"Outras Receitas":"Outros",
+      value:valor,
+      type:isRec?"in":"out",
+      src:"CSV",conta:"",status:"efetivado"
+    };
+  }).filter(Boolean);
+}
+
 function parseModeloFinn(text) {
   const lines=text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
   if(lines.length<2)return[];
@@ -143,6 +196,8 @@ async function aiCall(messages,system,maxTokens=800) {
 }
 
 async function categorizarComIA(transactions) {
+  // Skip transfers - they're already correctly classified
+  transactions = transactions.map(t => isTransfer(t.descricao)?{...t,cat:"Transferência",type:"transfer"}:t);
   const lista=transactions.map((t,i)=>i+"|"+t.descricao+"|"+Math.abs(t.value)).join("\n");
   const reply=await aiCall([{role:"user",content:"Classifique cada transação em uma das categorias: "+CAT_LIST.join(", ")+".\nRetorne APENAS JSON array: [{\"i\":0,\"cat\":\"Categoria\"}]\nTransações:\n"+lista}],"Classificador financeiro. Responda apenas com JSON.",1500);
   if(!reply)return transactions;
@@ -563,6 +618,7 @@ export default function App() {
   const [importPreview,setImportPreview]=useState([]);const [importFuturas,setImportFuturas]=useState([]);
   const [importing,setImporting]=useState(false);const [recatLoading,setRecatLoading]=useState(false);
   // Extrato filters
+  const [selectedTxs,setSelectedTxs]=useState(new Set());
   const [filterSrc,setFilterSrc]=useState("all");const [filterConta,setFilterConta]=useState("all");
   const [filterTipo,setFilterTipo]=useState("all");
   const [filterUser,setFilterUser]=useState("all");
@@ -607,14 +663,14 @@ export default function App() {
   });
 
   // Include ALL expenses (pending too) for categories
-  const income=filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
-  const expense=filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-  const pendingExpense=filteredTxs.filter(t=>t.type==="out"&&t.status==="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const income=filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Number(t.value),0);
+  const expense=filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const pendingExpense=filteredTxs.filter(t=>t.type==="out"&&t.status==="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
   const balance=income-expense;
   const savPct=income>0?(balance/income*100):0;
   const prevMonthKey=()=>{const[y,m]=selMonth.split("-").map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
   const prevTxs=txs.filter(t=>t.date?.startsWith(prevMonthKey()));
-  const prevExpense=prevTxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const prevExpense=prevTxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
   const expenseDiff=prevExpense>0?((expense-prevExpense)/prevExpense*100):null;
 
   // Categories: include pending too (already spent)
@@ -647,6 +703,18 @@ export default function App() {
   };
   const updateTx=async(tx)=>{const{error}=await supabase.from("transactions").update({descricao:tx.descricao,value:tx.value,cat:tx.cat,type:tx.type,date:tx.date,conta:tx.conta||"",status:tx.status||"efetivado"}).eq("id",tx.id);setEditTx(null);if(!error){const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});if(data)setTxs(data);}};
   const deleteTx=async(id)=>{await supabase.from("transactions").delete().eq("id",id);setTxs(p=>p.filter(t=>t.id!==id));};
+  const deleteBulk=async()=>{
+    if(!selectedTxs.size)return;
+    if(!window.confirm("Excluir "+selectedTxs.size+" lançamentos selecionados?"))return;
+    const ids=[...selectedTxs];
+    for(let i=0;i<ids.length;i+=20){
+      await supabase.from("transactions").delete().in("id",ids.slice(i,i+20));
+    }
+    setTxs(p=>p.filter(t=>!selectedTxs.has(t.id)));
+    setSelectedTxs(new Set());
+  };
+  const toggleSelect=id=>setSelectedTxs(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleSelectAll=()=>{if(selectedTxs.size===shownTxs.length){setSelectedTxs(new Set());}else{setSelectedTxs(new Set(shownTxs.map(t=>t.id)));}};
 
   const handleFiles=useCallback(async(e)=>{const files=Array.from(e.target.files||[]);if(!files.length)return;setImportFiles(files);setImportAccount("");setImportFaturaMes("");setImportPreview([]);setImportFuturas([]);setImportStep("select_account");e.target.value="";},[]);
 
@@ -814,7 +882,7 @@ export default function App() {
           <div style={card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span><button onClick={()=>setPage("extrato")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver extrato</button></div>
             {filteredTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação neste período.</div>}
-            {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
+            {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
           </div>
         </>}
       </>}
@@ -830,7 +898,15 @@ export default function App() {
       </>}
 
       {page==="extrato"&&<>
-        <div style={{fontWeight:800,fontSize:18,marginBottom:12}}>Extrato <span style={{fontSize:13,fontWeight:500,color:T.sub}}>({shownTxs.length})</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontWeight:800,fontSize:18}}>Extrato <span style={{fontSize:13,fontWeight:500,color:T.sub}}>({shownTxs.length})</span></div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {selectedTxs.size>0&&<button onClick={deleteBulk} style={{padding:"7px 12px",background:T.red,color:"#fff",border:"none",borderRadius:8,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>🗑️ Excluir {selectedTxs.size}</button>}
+            <button onClick={toggleSelectAll} style={{padding:"7px 12px",background:selectedTxs.size>0?T.accentLt:T.surface,color:selectedTxs.size>0?T.accent:T.sub,border:"1.5px solid "+(selectedTxs.size>0?T.accent:T.border),borderRadius:8,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              {selectedTxs.size===shownTxs.length&&shownTxs.length>0?"☑ Todos":"☐ Selecionar"}
+            </button>
+          </div>
+        </div>
 
         {/* Filters */}
         <div style={card}>
@@ -899,8 +975,9 @@ export default function App() {
 
         <div style={card}>
           {shownTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação encontrada.</div>}
-          {shownTxs.map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderTop:i>0?"1px solid "+T.border:"none",opacity:t.status==="pendente"?0.8:1}}>
-            <div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div>
+          {shownTxs.map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderTop:i>0?"1px solid "+T.border:"none",opacity:t.status==="pendente"?0.8:1,background:selectedTxs.has(t.id)?T.accentLt:"transparent",borderRadius:8,paddingLeft:selectedTxs.size>0?6:0,transition:"all .15s"}}>
+            {selectedTxs.size>0&&<div onClick={()=>toggleSelect(t.id)} style={{width:20,height:20,borderRadius:5,border:"2px solid "+(selectedTxs.has(t.id)?T.accent:T.border),background:selectedTxs.has(t.id)?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"pointer"}}>{selectedTxs.has(t.id)&&<span style={{color:"#fff",fontSize:11,fontWeight:800}}>✓</span>}</div>}
+            <div onClick={()=>selectedTxs.size>0&&toggleSelect(t.id)} style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0,cursor:selectedTxs.size>0?"pointer":"default"}}>{CATS[t.cat]?.icon||"📦"}</div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
               <div style={{fontSize:11,color:T.sub,marginTop:1,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
@@ -908,12 +985,12 @@ export default function App() {
                 {t.data_compra&&t.data_compra!==t.date&&<span style={{color:T.yellow}}>📅{t.data_compra}</span>}
                 <span style={{color:CATS[t.cat]?.color||T.sub}}>{t.cat}</span>
                 {t.conta&&<SrcBadge src={t.conta.split(" ")[0]}/>}
-                {t.status==="pendente"&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:T.yellowLt,color:"#c2880a",fontWeight:700}}>pendente</span>}
+                {t.status==="pendente"&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:T.yellowLt,color:"#c2880a",fontWeight:700}}>pendente</span>}{t.cat==="Transferência"&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:"#f1f5f9",color:"#64748b",fontWeight:700}}>🔄 transferência</span>}
                 {t.total_parcelas&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:"#f3e8ff",color:"#7c3aed",fontWeight:700}}>{t.parcela_atual}/{t.total_parcelas}</span>}
                 {t.user_email&&t.user_email!==session?.user?.email&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:T.accentLt,color:T.accent,fontWeight:700}}>👩 {t.user_email.split("@")[0]}</span>}
               </div>
             </div>
-            <span style={{fontSize:13,fontWeight:700,color:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span>
+            <span style={{fontSize:13,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span>
             <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
               <button onClick={()=>setEditTx(t)} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:14,padding:"0 2px"}}>✏️</button>
               <button onClick={()=>deleteTx(t.id)} style={{background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,padding:"0 2px"}}>🗑️</button>
