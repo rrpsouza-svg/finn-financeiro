@@ -168,28 +168,24 @@ function parseBudgetCSV(text) {
   if (lines.length < 2) return [];
   const hdrs = lines[0].split(";").map(h=>h.replace(/"/g,"").trim().toUpperCase());
   const idx = k => hdrs.findIndex(h=>h.includes(k));
-  const iMes   = idx("MES")>=0?idx("MES"):0;
-  const iTipo  = idx("TIPO")>=0?idx("TIPO"):1;
-  const iCat   = idx("CATEG")>=0?idx("CATEG"):2;
-  const iDesc  = idx("DESC")>=0?idx("DESC"):3;
-  const iValor = idx("VALOR")>=0?idx("VALOR"):4;
+  const iMes=idx("MES")>=0?idx("MES"):0,iTipo=idx("TIPO")>=0?idx("TIPO"):1;
+  const iCat=idx("CATEG")>=0?idx("CATEG"):2,iDesc=idx("DESC")>=0?idx("DESC"):3,iValor=idx("VALOR")>=0?idx("VALOR"):4;
+  const MNAMES=["janeiro","fevereiro","marco","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+  const parseMes = s => {
+    s = s.trim();
+    if (s.length===7&&s[4]==='-') return s;
+    if (s.length===7&&s[2]==='/') return s.slice(3)+'-'+s.slice(0,2);
+    const parts = s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').split(' ').filter(Boolean);
+    const mi = MNAMES.findIndex(m=>parts[0]&&parts[0].startsWith(m.slice(0,3)));
+    const yr = parts.find(p=>p.length===4&&Number(p)>2000);
+    return (mi>=0&&yr)?yr+'-'+String(mi+1).padStart(2,'0'):s;
+  };
   return lines.slice(1).map(line=>{
-    const c = line.split(";").map(s=>s.replace(/"/g,"").trim());
-    if (!c[iMes]||!c[iValor]) return null;
-    const valor = parseFloat((c[iValor]||"0").replace(/\./g,"").replace(",","."));
-    if (isNaN(valor)||valor<=0) return null;
-    // Parse mes: YYYY-MM or MM/YYYY or Janeiro 2026
-    let mes = c[iMes].trim();
-    if (/^\d{4}-\d{2}$/.test(mes)) {} // already good
-    else if (/^\d{2}\/\d{4}$/.test(mes)) mes = mes.slice(3)+"-"+mes.slice(0,2);
-    else {
-      const mnames=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
-      const parts = mes.toLowerCase().split(/[\s/]+/);
-      const mi = mnames.findIndex(m=>parts[0].startsWith(m.slice(0,3)));
-      const yr = parts.find(p=>/^\d{4}$/.test(p));
-      if (mi>=0&&yr) mes = yr+"-"+String(mi+1).padStart(2,"0");
-    }
-    return {mes, tipo:c[iTipo]||"Despesa", categoria:c[iCat]||"Outros", descricao:c[iDesc]||"", valor};
+    const c=line.split(";").map(s=>s.replace(/"/g,"").trim());
+    if(!c[iMes]||!c[iValor])return null;
+    const valor=parseFloat((c[iValor]||"0").replace(/[.]/g,"").replace(",","."));
+    if(isNaN(valor)||valor<=0)return null;
+    return{mes:parseMes(c[iMes]),tipo:c[iTipo]||"Despesa",categoria:c[iCat]||"Outros",descricao:c[iDesc]||"",valor};
   }).filter(Boolean);
 }
 
