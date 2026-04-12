@@ -275,10 +275,10 @@ function ProjectionChart({txs,budget}) {
         </tr></thead>
         <tbody>{proj.map((p,i)=>{const sal=p.totalRec-p.totalDesp;return(<tr key={p.mes} style={{background:p.isCurrent?T.accentLt:i%2===0?T.bg:"#fff",fontWeight:p.isCurrent?700:400}}>
           <td style={{padding:"5px 8px",color:p.isPast?T.dark:T.sub,whiteSpace:"nowrap"}}>{p.label}{!p.isPast&&!p.isCurrent?<span style={{fontSize:9,color:T.yellow,marginLeft:4}}>proj</span>:null}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:T.green,fontFamily:M}}>R${p.totalRec.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:p.isPast?T.red:T.yellow,fontFamily:M}}>R${p.totalDesp.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:sal>=0?T.green:T.red,fontFamily:M}}>{sal>=0?"+":""}R${Math.abs(sal).toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:balances[i]>=0?T.accent:T.red,fontFamily:M,fontWeight:700}}>R${balances[i].toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:T.green,fontFamily:M}}>{"R$"+p.totalRec.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:p.isPast?T.red:T.yellow,fontFamily:M}}>{"R$"+p.totalDesp.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:sal>=0?T.green:T.red,fontFamily:M}}>{(sal>=0?"+":"")+"R$"+Math.abs(sal).toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:balances[i]>=0?T.accent:T.red,fontFamily:M,fontWeight:700}}>{"R$"+balances[i].toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
         </tr>);})</tbody>
       </table>
     </div>
