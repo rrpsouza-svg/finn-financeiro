@@ -40,6 +40,20 @@ const DEFAULT_GOALS = {
 
 const MONTHS_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
+const DEFAULT_ACCOUNTS = [
+  {nome:"Nubank CC",         tipo:"CC",          banco:"Nubank",         saldo_inicial:0, limite:0,    dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Nubank Crédito",    tipo:"credito",      banco:"Nubank",         saldo_inicial:0, limite:8000, dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Bradesco Crédito",  tipo:"credito",      banco:"Bradesco",       saldo_inicial:0, limite:5000, dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Itaú CC",           tipo:"CC",           banco:"Itaú",           saldo_inicial:0, limite:0,    dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Itaú Crédito",      tipo:"credito",      banco:"Itaú",           saldo_inicial:0, limite:5000, dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"C6 Bank CC",        tipo:"CC",           banco:"C6 Bank",        saldo_inicial:0, limite:0,    dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"C6 Bank Crédito",   tipo:"credito",      banco:"C6 Bank",        saldo_inicial:0, limite:3000, dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Mercado Livre CC",  tipo:"CC",           banco:"Mercado Livre",  saldo_inicial:0, limite:0,    dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Mercado Crédito",   tipo:"credito",      banco:"Mercado Livre",  saldo_inicial:0, limite:3000, dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"Sicredi CC",        tipo:"CC",           banco:"Sicredi",        saldo_inicial:0, limite:0,    dia_vencimento:5,  dia_fechamento:25, ativo:true},
+  {nome:"XP Investimentos",  tipo:"investimento", banco:"XP",             saldo_inicial:0, limite:0,    dia_vencimento:5,  dia_fechamento:25, ativo:true},
+];
+
 function parseOFX(text) {
   const blocks = text.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || [];
   return blocks.map((b) => {
@@ -47,7 +61,7 @@ function parseOFX(text) {
     const raw = get("DTPOSTED");
     const date = raw.length>=8?raw.slice(0,4)+"-"+raw.slice(4,6)+"-"+raw.slice(6,8):new Date().toISOString().slice(0,10);
     const amt = parseFloat(get("TRNAMT")||"0");
-    return {date, descricao:get("MEMO")||get("NAME")||"Transação", cat:amt>=0?"Outras Receitas":"Outros", value:amt, type:amt>=0?"in":"out", src:"OFX"};
+    return {date, descricao:get("MEMO")||get("NAME")||"Transação", cat:amt>=0?"Outras Receitas":"Outros", value:amt, type:amt>=0?"in":"out", src:"OFX", conta:"", status:"efetivado"};
   });
 }
 
@@ -63,7 +77,7 @@ function parseCSV(text) {
     const c = line.split(",").map(s=>s.replace(/"/g,"").trim());
     const amt = parseFloat((c[vi]||"0").replace(",","."))*(hdrs[vi]?.includes("debito")?-1:1);
     if (isNaN(amt)) return null;
-    return {date:c[di]||new Date().toISOString().slice(0,10), descricao:c[ni]||"Transação", cat:amt>=0?"Outras Receitas":"Outros", value:amt, type:amt>=0?"in":"out", src:"CSV"};
+    return {date:c[di]||new Date().toISOString().slice(0,10), descricao:c[ni]||"Transação", cat:amt>=0?"Outras Receitas":"Outros", value:amt, type:amt>=0?"in":"out", src:"CSV", conta:"", status:"efetivado"};
   }).filter(Boolean);
 }
 
@@ -79,9 +93,6 @@ function parseModeloFinn(text) {
   const iTipo      = idx("TIPO")>=0?idx("TIPO"):4;
   const iConta     = idx("CONTA")>=0?idx("CONTA"):5;
   const iCat       = idx("CATEG")>=0?idx("CATEG"):6;
-  const iParcAtual = idx("PARCELA_A")>=0?idx("PARCELA_A"):7;
-  const iParcTotal = idx("TOTAL_P")>=0?idx("TOTAL_P"):8;
-  const iGrupo     = idx("GRUPO")>=0?idx("GRUPO"):9;
   const parseDate = s => {
     if (!s) return new Date().toISOString().slice(0,10);
     s = s.replace(/"/g,"").trim();
@@ -99,14 +110,13 @@ function parseModeloFinn(text) {
     const tipo  = (c[iTipo]||"").toLowerCase();
     const isRec = tipo.includes("receita");
     const cat   = c[iCat]||(isRec?"Outras Receitas":"Outros");
-    const date  = parseDate(c[iDataPag])||parseDate(c[iDataComp]);
+    const date  = parseDate(c[iDataPag]);
+    const data_compra = parseDate(c[iDataComp]);
+    const isCard = tipo.includes("cartão")||tipo.includes("cartao")||tipo.includes("crédito")||tipo.includes("credito");
     return {
-      date, descricao:c[iDesc], cat,
-      value:isRec?valor:-valor, type:isRec?"in":"out", src:"modelo",
-      conta:c[iConta]||"",
-      parcela_atual:parseInt(c[iParcAtual])||null,
-      total_parcelas:parseInt(c[iParcTotal])||null,
-      grupo_parcela:c[iGrupo]||null,
+      date, data_compra, descricao:c[iDesc], cat,
+      value:isRec?valor:-valor, type:isRec?"in":"out",
+      src:"modelo", conta:c[iConta]||"", status:"efetivado",
     };
   }).filter(Boolean);
 }
@@ -131,6 +141,41 @@ async function categorizarComIA(transactions) {
     const result = JSON.parse(reply.replace(/```json|```/g,"").trim());
     return transactions.map((t,i)=>{const f=result.find(r=>r.i===i);return f?{...t,cat:f.cat}:t;});
   } catch { return transactions; }
+}
+
+// ── Excel export ──
+function exportToExcel(txs, selMonth) {
+  const header = ["DATA_PAGAMENTO","DATA_COMPRA","DESCRICAO","VALOR","TIPO","CONTA","CATEGORIA","STATUS","FONTE"];
+  const rows = txs.map(t => [
+    t.date||"",
+    t.data_compra||t.date||"",
+    t.descricao||"",
+    Math.abs(Number(t.value)).toFixed(2).replace(".",","),
+    t.type==="in"?"Receita":"Despesa",
+    t.conta||"",
+    t.cat||"",
+    t.status||"efetivado",
+    t.src||"manual",
+  ]);
+  const totalRec = txs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0);
+  const totalDesp = txs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const summary = [
+    [],
+    ["RESUMO"],
+    ["Total Receitas","R$ "+totalRec.toLocaleString("pt-BR",{minimumFractionDigits:2})],
+    ["Total Despesas","R$ "+totalDesp.toLocaleString("pt-BR",{minimumFractionDigits:2})],
+    ["Saldo","R$ "+(totalRec-totalDesp).toLocaleString("pt-BR",{minimumFractionDigits:2})],
+    ["Período",selMonth==="all"?"Todos os meses":selMonth],
+    ["Gerado em",new Date().toLocaleDateString("pt-BR")],
+  ];
+  const allRows = [header, ...rows, ...summary];
+  const csv = allRows.map(r=>r.map(v=>"\""+String(v).replace(/"/g,"\"\"")+"\""  ).join(";")).join("\n");
+  const BOM = "\uFEFF";
+  const blob = new Blob([BOM+csv],{type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href=url; a.download="finn-relatorio-"+selMonth+".csv"; a.click();
+  URL.revokeObjectURL(url);
 }
 
 function Donut({segs,size=80}) {
@@ -167,10 +212,11 @@ function WaBubble({msg}) {
   );
 }
 
-function EditModal({tx,onSave,onClose}) {
-  const [form,setForm]=useState({descricao:tx.descricao,value:Math.abs(tx.value),cat:tx.cat,type:tx.type,date:tx.date});
+function EditModal({tx,onSave,onClose,accounts}) {
+  const [form,setForm]=useState({descricao:tx.descricao,value:Math.abs(tx.value),cat:tx.cat,type:tx.type,date:tx.date,conta:tx.conta||"",status:tx.status||"efetivado"});
   const inp={width:"100%",padding:"11px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:14,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff"};
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:.6};
+  const sel={...inp,padding:"10px 14px"};
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
       <div style={{background:T.surface,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto"}}>
@@ -186,6 +232,20 @@ function EditModal({tx,onSave,onClose}) {
           <div><label style={lbl}>Valor (R$)</label><input type="number" style={inp} value={form.value} onChange={e=>setForm(f=>({...f,value:e.target.value}))}/></div>
           <div><label style={lbl}>Data</label><input type="date" style={inp} value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div>
         </div>
+        <div style={{marginBottom:12}}>
+          <label style={lbl}>Conta / Cartão</label>
+          <select style={sel} value={form.conta} onChange={e=>setForm(f=>({...f,conta:e.target.value}))}>
+            <option value="">-- Selecione --</option>
+            {accounts.map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}
+          </select>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={lbl}>Status</label>
+          <select style={sel} value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))}>
+            <option value="efetivado">Efetivado</option>
+            <option value="pendente">Pendente</option>
+          </select>
+        </div>
         <div style={{marginBottom:20}}>
           <label style={lbl}>Categoria</label>
           <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
@@ -194,7 +254,7 @@ function EditModal({tx,onSave,onClose}) {
             ))}
           </div>
         </div>
-        <button onClick={()=>onSave({...tx,descricao:form.descricao,value:INCOME_CATS.includes(form.cat)?Math.abs(parseFloat(form.value)):-Math.abs(parseFloat(form.value)),cat:form.cat,type:INCOME_CATS.includes(form.cat)?"in":"out",date:form.date})}
+        <button onClick={()=>onSave({...tx,descricao:form.descricao,value:INCOME_CATS.includes(form.cat)?Math.abs(parseFloat(form.value)):-Math.abs(parseFloat(form.value)),cat:form.cat,type:INCOME_CATS.includes(form.cat)?"in":"out",date:form.date,conta:form.conta,status:form.status})}
           style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer"}}>
           Salvar alterações
         </button>
@@ -211,8 +271,7 @@ function LoginScreen() {
   const [forgot,setForgot]=useState(false);
   const inp={width:"100%",padding:"13px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",marginBottom:12};
   const handleLogin=async()=>{
-    if(!email||!pass)return;
-    setLoading(true);setMsg(null);
+    if(!email||!pass)return; setLoading(true);setMsg(null);
     const{error}=await supabase.auth.signInWithPassword({email,password:pass});
     if(error)setMsg("E-mail ou senha incorretos.");
     setLoading(false);
@@ -251,33 +310,149 @@ function LoginScreen() {
   );
 }
 
+// ── Accounts page ──
+function AccountsPage({accounts,setAccounts}) {
+  const [editAcc,setEditAcc]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const TIPO_COLORS={CC:T.accent,credito:T.red,investimento:T.green};
+  const TIPO_ICONS={CC:"🏦",credito:"💳",investimento:"📈"};
+
+  const saveAccount=async(acc)=>{
+    setSaving(true);
+    if(acc.id){
+      const{data}=await supabase.from("accounts").update({nome:acc.nome,saldo_inicial:acc.saldo_inicial,limite:acc.limite,ativo:acc.ativo}).eq("id",acc.id).select().single();
+      if(data)setAccounts(p=>p.map(a=>a.id===acc.id?data:a));
+    } else {
+      const{data}=await supabase.from("accounts").insert([acc]).select().single();
+      if(data)setAccounts(p=>[...p,data]);
+    }
+    setEditAcc(null);setSaving(false);
+  };
+
+  const inp={width:"100%",padding:"11px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:14,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",marginBottom:10};
+  const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:.6};
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:18}}>Contas e Cartões</div>
+          <div style={{fontSize:12,color:T.sub,marginTop:2}}>{accounts.filter(a=>a.ativo).length} contas ativas</div>
+        </div>
+        <button onClick={()=>setEditAcc({nome:"",tipo:"CC",banco:"",saldo_inicial:0,limite:0,dia_vencimento:5,dia_fechamento:25,ativo:true})}
+          style={{padding:"8px 14px",background:T.accent,color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          + Nova
+        </button>
+      </div>
+
+      {["CC","credito","investimento"].map(tipo=>{
+        const accs=accounts.filter(a=>a.tipo===tipo&&a.ativo);
+        if(!accs.length)return null;
+        return (
+          <div key={tipo} style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>
+              {TIPO_ICONS[tipo]} {tipo==="CC"?"Contas Correntes":tipo==="credito"?"Cartões de Crédito":"Investimentos"}
+            </div>
+            {accs.map(a=>(
+              <div key={a.id} style={{background:T.card,borderRadius:14,padding:16,marginBottom:8,boxShadow:T.shadow,border:"1px solid "+T.border}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700}}>{a.nome}</div>
+                    <div style={{fontSize:11,color:T.sub,marginTop:2}}>{a.banco}</div>
+                  </div>
+                  <button onClick={()=>setEditAcc(a)} style={{background:T.accentLt,border:"none",borderRadius:8,padding:"6px 10px",color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F}}>Editar</button>
+                </div>
+                <div style={{display:"flex",gap:16,marginTop:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Saldo inicial</div>
+                    <div style={{fontSize:15,fontWeight:700,color:T.green,fontFamily:M}}>R${Number(a.saldo_inicial).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+                  </div>
+                  {a.tipo==="credito"&&<div>
+                    <div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Limite</div>
+                    <div style={{fontSize:15,fontWeight:700,color:T.accent,fontFamily:M}}>R${Number(a.limite).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+                  </div>}
+                  {a.tipo==="credito"&&<div>
+                    <div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Vencimento</div>
+                    <div style={{fontSize:15,fontWeight:700,fontFamily:M}}>Dia {a.dia_vencimento}</div>
+                  </div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {editAcc&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{background:T.surface,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <span style={{fontSize:16,fontWeight:800}}>{editAcc.id?"Editar":"Nova"} Conta</span>
+              <button onClick={()=>setEditAcc(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub}}>x</button>
+            </div>
+            <label style={lbl}>Nome</label>
+            <input style={inp} value={editAcc.nome} onChange={e=>setEditAcc(a=>({...a,nome:e.target.value}))} placeholder="Ex: Nubank Crédito"/>
+            <label style={lbl}>Banco</label>
+            <input style={inp} value={editAcc.banco} onChange={e=>setEditAcc(a=>({...a,banco:e.target.value}))} placeholder="Ex: Nubank"/>
+            <label style={lbl}>Tipo</label>
+            <select style={{...inp}} value={editAcc.tipo} onChange={e=>setEditAcc(a=>({...a,tipo:e.target.value}))}>
+              <option value="CC">Conta Corrente</option>
+              <option value="credito">Cartão de Crédito</option>
+              <option value="investimento">Investimento</option>
+            </select>
+            <label style={lbl}>Saldo Inicial (R$)</label>
+            <input type="number" style={inp} value={editAcc.saldo_inicial} onChange={e=>setEditAcc(a=>({...a,saldo_inicial:parseFloat(e.target.value)||0}))}/>
+            {editAcc.tipo==="credito"&&<>
+              <label style={lbl}>Limite (R$)</label>
+              <input type="number" style={inp} value={editAcc.limite} onChange={e=>setEditAcc(a=>({...a,limite:parseFloat(e.target.value)||0}))}/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div>
+                  <label style={lbl}>Dia Fechamento</label>
+                  <input type="number" style={inp} value={editAcc.dia_fechamento} onChange={e=>setEditAcc(a=>({...a,dia_fechamento:parseInt(e.target.value)||25}))}/>
+                </div>
+                <div>
+                  <label style={lbl}>Dia Vencimento</label>
+                  <input type="number" style={inp} value={editAcc.dia_vencimento} onChange={e=>setEditAcc(a=>({...a,dia_vencimento:parseInt(e.target.value)||5}))}/>
+                </div>
+              </div>
+            </>}
+            <button onClick={()=>saveAccount(editAcc)} disabled={saving} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer",marginTop:8,opacity:saving?0.7:1}}>
+              {saving?"Salvando...":"Salvar"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
-  const [session,setSession]       = useState(null);
-  const [authReady,setAuthReady]   = useState(false);
-  const [txs,setTxs]               = useState([]);
-  const [loadingTxs,setLoadingTxs] = useState(false);
-  const [page,setPage]             = useState("home");
-  const [editTx,setEditTx]         = useState(null);
+  const [session,setSession]         = useState(null);
+  const [authReady,setAuthReady]     = useState(false);
+  const [txs,setTxs]                 = useState([]);
+  const [accounts,setAccounts]       = useState([]);
+  const [loadingTxs,setLoadingTxs]   = useState(false);
+  const [page,setPage]               = useState("home");
+  const [editTx,setEditTx]           = useState(null);
   const now = new Date();
-  const [selMonth,setSelMonth]     = useState(now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0"));
-  const [goals,setGoals]           = useState(()=>{try{return JSON.parse(localStorage.getItem("finn_goals")||"{}")||DEFAULT_GOALS;}catch{return DEFAULT_GOALS;}});
-  const [editGoals,setEditGoals]   = useState(false);
-  const [goalDraft,setGoalDraft]   = useState({});
-  const [chatLog,setChatLog]       = useState([{role:"assistant",content:"Olá! Sou a Finn. Posso analisar gastos, registrar transações e gerar resumos.\n\nO que precisam?"}]);
-  const [chatIn,setChatIn]         = useState("");
-  const [chatBusy,setChatBusy]     = useState(false);
+  const [selMonth,setSelMonth]       = useState(now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0"));
+  const [goals,setGoals]             = useState(()=>{try{return JSON.parse(localStorage.getItem("finn_goals")||"{}")||DEFAULT_GOALS;}catch{return DEFAULT_GOALS;}});
+  const [editGoals,setEditGoals]     = useState(false);
+  const [goalDraft,setGoalDraft]     = useState({});
+  const [chatLog,setChatLog]         = useState([{role:"assistant",content:"Olá! Sou a Finn. Posso analisar gastos, registrar transações e gerar resumos.\n\nO que precisam?"}]);
+  const [chatIn,setChatIn]           = useState("");
+  const [chatBusy,setChatBusy]       = useState(false);
   const [isListening,setIsListening] = useState(false);
-  const [historyLoaded,setHistoryLoaded] = useState(false);
-  const [form,setForm]             = useState({descricao:"",value:"",cat:"Alimentação",type:"out",date:new Date().toISOString().slice(0,10)});
-  const [importLog,setImportLog]   = useState([]);
-  const [importing,setImporting]   = useState(false);
+  const [form,setForm]               = useState({descricao:"",value:"",cat:"Alimentação",type:"out",date:new Date().toISOString().slice(0,10),conta:"",data_compra:"",status:"efetivado"});
+  const [importLog,setImportLog]     = useState([]);
+  const [importing,setImporting]     = useState(false);
   const [recatLoading,setRecatLoading] = useState(false);
-  const [filterSrc,setFilterSrc]   = useState("all");
-  const [savingTx,setSavingTx]     = useState(false);
-  const [resumo,setResumo]         = useState(null);
+  const [filterSrc,setFilterSrc]     = useState("all");
+  const [filterConta,setFilterConta] = useState("all");
+  const [savingTx,setSavingTx]       = useState(false);
+  const [resumo,setResumo]           = useState(null);
   const [resumoLoading,setResumoLoading] = useState(false);
-  const chatEnd = useRef(null);
-  const fileRef = useRef(null);
+  const chatEnd   = useRef(null);
+  const fileRef   = useRef(null);
   const recognitionRef = useRef(null);
   const hasAI = !!process.env.REACT_APP_ANTHROPIC_KEY;
 
@@ -291,18 +466,19 @@ export default function App() {
     if(!session)return;
     setLoadingTxs(true);
     supabase.from("transactions").select("*").order("date",{ascending:false}).then(({data})=>{setTxs(data||[]);setLoadingTxs(false);});
+    // Load accounts
+    supabase.from("accounts").select("*").order("nome").then(async({data})=>{
+      if(data&&data.length>0){setAccounts(data);}
+      else {
+        // First time: seed default accounts
+        const{data:inserted}=await supabase.from("accounts").insert(DEFAULT_ACCOUNTS).select();
+        if(inserted)setAccounts(inserted);
+      }
+    });
     // Load chat history (last 30 days)
-    const since = new Date(); since.setDate(since.getDate()-30);
-    supabase.from("chat_history").select("*")
-      .eq("user_id",session.user.id)
-      .gte("created_at",since.toISOString())
-      .order("created_at",{ascending:true})
-      .then(({data})=>{
-        if(data&&data.length>0){
-          setChatLog(data.map(m=>({role:m.role,content:m.content})));
-        }
-        setHistoryLoaded(true);
-      });
+    const since=new Date();since.setDate(since.getDate()-30);
+    supabase.from("chat_history").select("*").eq("user_id",session.user.id).gte("created_at",since.toISOString()).order("created_at",{ascending:true})
+      .then(({data})=>{if(data&&data.length>0)setChatLog(data.map(m=>({role:m.role,content:m.content})));});
   },[session]);
 
   useEffect(()=>{
@@ -315,24 +491,37 @@ export default function App() {
 
   useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth"});},[chatLog]);
 
-  const filteredTxs = selMonth==="all"?txs:txs.filter(t=>t.date?.startsWith(selMonth));
-  const prevMonthKey = ()=>{const[y,m]=selMonth.split("-").map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
-  const prevTxs = txs.filter(t=>t.date?.startsWith(prevMonthKey()));
+  const filteredTxs = txs.filter(t=>{
+    const monthOk = selMonth==="all"||t.date?.startsWith(selMonth);
+    const contaOk = filterConta==="all"||t.conta===filterConta;
+    return monthOk&&contaOk;
+  });
+  const prevMonthKey=()=>{const[y,m]=selMonth.split("-").map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
+  const prevTxs=txs.filter(t=>t.date?.startsWith(prevMonthKey()));
   const income  = filteredTxs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0);
   const expense = filteredTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
   const balance = income-expense;
   const savPct  = income>0?(balance/income*100):0;
-  const prevExpense = prevTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-  const expenseDiff = prevExpense>0?((expense-prevExpense)/prevExpense*100):null;
-  const catData = EXPENSE_CATS.map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0)})).filter(d=>d.val>0).sort((a,b)=>b.val-a.val);
-  const incomeData = INCOME_CATS.map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="in").reduce((a,t)=>a+Number(t.value),0)})).filter(d=>d.val>0);
-  const availableMonths = [...new Set(txs.map(t=>t.date?.slice(0,7)).filter(Boolean))].sort().reverse();
+  const prevExpense=prevTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const expenseDiff=prevExpense>0?((expense-prevExpense)/prevExpense*100):null;
+  const catData=EXPENSE_CATS.map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0)})).filter(d=>d.val>0).sort((a,b)=>b.val-a.val);
+  const incomeData=INCOME_CATS.map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="in").reduce((a,t)=>a+Number(t.value),0)})).filter(d=>d.val>0);
+  const availableMonths=[...new Set(txs.map(t=>t.date?.slice(0,7)).filter(Boolean))].sort().reverse();
   const[selY,selM]=selMonth.split("-").map(Number);
-  const monthLabel = MONTHS_PT[selM-1]+" "+selY;
+  const monthLabel=MONTHS_PT[selM-1]+" "+selY;
 
-  const signOut=()=>{supabase.auth.signOut();setTxs([]);};
+  // Account balances
+  const accBalances=accounts.filter(a=>a.ativo).map(a=>{
+    const accTxs=txs.filter(t=>t.conta===a.nome);
+    const mov=accTxs.reduce((s,t)=>s+Number(t.value),0);
+    return{...a, saldoAtual:Number(a.saldo_inicial)+mov,
+      faturaAberta:a.tipo==="credito"?Math.abs(txs.filter(t=>t.conta===a.nome&&t.type==="out"&&t.date?.startsWith(selMonth==="all"?now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0"):selMonth)).reduce((s,t)=>s+Number(t.value),0)):0
+    };
+  });
+
+  const signOut=()=>{supabase.auth.signOut();setTxs([]);setAccounts([]);};
   const saveTx=async(tx)=>{const{data,error}=await supabase.from("transactions").insert([tx]).select().single();if(!error&&data)setTxs(p=>[data,...p]);};
-  const updateTx=async(tx)=>{const{error}=await supabase.from("transactions").update({descricao:tx.descricao,value:tx.value,cat:tx.cat,type:tx.type,date:tx.date}).eq("id",tx.id);setEditTx(null);if(!error){const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});if(data)setTxs(data);}};
+  const updateTx=async(tx)=>{const{error}=await supabase.from("transactions").update({descricao:tx.descricao,value:tx.value,cat:tx.cat,type:tx.type,date:tx.date,conta:tx.conta||"",status:tx.status||"efetivado"}).eq("id",tx.id);setEditTx(null);if(!error){const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});if(data)setTxs(data);}};
   const deleteTx=async(id)=>{await supabase.from("transactions").delete().eq("id",id);setTxs(p=>p.filter(t=>t.id!==id));};
 
   const handleFiles=useCallback(async(e)=>{
@@ -343,18 +532,18 @@ export default function App() {
       else if(name.endsWith(".csv")||name.endsWith(".txt")){
         if(text.toUpperCase().includes("DATA_PAG")||text.toUpperCase().includes("GRUPO_PARCELA")){parsed=parseModeloFinn(text);isModelo=true;}
         else{parsed=parseCSV(text);}
-      } else{setImportLog(p=>["Formato não suportado: "+file.name,...p]);continue;}
-      if(parsed.length===0){setImportLog(p=>["Nenhuma transação encontrada: "+file.name,...p]);continue;}
-      setImportLog(p=>["Processando "+parsed.length+" transações de "+file.name+"...",...p]);
+      }else{setImportLog(p=>["Formato não suportado: "+file.name,...p]);continue;}
+      if(parsed.length===0){setImportLog(p=>["Nenhuma transação: "+file.name,...p]);continue;}
+      setImportLog(p=>["Processando "+parsed.length+" de "+file.name+"...",...p]);
       const semCat=parsed.filter(t=>!t.cat||t.cat==="Outros"||t.cat==="Outras Receitas");
       const comCat=parsed.filter(t=>t.cat&&t.cat!=="Outros"&&t.cat!=="Outras Receitas");
       let categorized=[...comCat];
       if(semCat.length>0&&hasAI){const aiCat=await categorizarComIA(semCat);categorized=[...categorized,...aiCat];}
       else{categorized=[...categorized,...semCat];}
-      const toInsert=categorized.map(({date,descricao,cat,value,type,src})=>({date,descricao,cat,value,type,src:src||"modelo"}));
+      const toInsert=categorized.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({date,data_compra:data_compra||null,descricao,cat,value,type,src:src||"modelo",conta:conta||"",status:status||"efetivado"}));
       let inserted=0;
       for(let i=0;i<toInsert.length;i+=50){const{data}=await supabase.from("transactions").insert(toInsert.slice(i,i+50)).select();if(data){setTxs(p=>[...data,...p]);inserted+=data.length;}}
-      setImportLog(p=>{const n=[...p];n[0]=inserted+" transações importadas de "+file.name+(isModelo?" (modelo finn)":"");return n;});
+      setImportLog(p=>{const n=[...p];n[0]=inserted+" transações de "+file.name+(isModelo?" (modelo)":"");return n;});
     }
     setImporting(false);e.target.value="";
   },[hasAI]);
@@ -362,17 +551,14 @@ export default function App() {
   const recategorizarTudo=async()=>{
     if(!hasAI)return;setRecatLoading(true);
     const chunks=[];for(let i=0;i<txs.length;i+=50)chunks.push(txs.slice(i,i+50));
-    for(const chunk of chunks){
-      const result=await categorizarComIA(chunk);
-      for(const tx of result){await supabase.from("transactions").update({cat:tx.cat,type:INCOME_CATS.includes(tx.cat)?"in":"out"}).eq("id",tx.id);}
-    }
+    for(const chunk of chunks){const result=await categorizarComIA(chunk);for(const tx of result){await supabase.from("transactions").update({cat:tx.cat,type:INCOME_CATS.includes(tx.cat)?"in":"out"}).eq("id",tx.id);}}
     const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});
     if(data)setTxs(data);setRecatLoading(false);alert("Recategorização concluída!");
   };
 
   const gerarResumo=async()=>{
     if(!hasAI)return;setResumoLoading(true);setResumo(null);
-    const lista=filteredTxs.slice(0,60).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+( t.type==="in"?"entrada":"saída")+")").join("\n");
+    const lista=filteredTxs.slice(0,60).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+(t.type==="in"?"entrada":"saída")+")").join("\n");
     const reply=await aiCall([{role:"user",content:"Gere um resumo financeiro de "+monthLabel+" para um casal. Máximo 200 palavras, use emojis.\n\nReceitas: R$"+income.toFixed(2)+"\nDespesas: R$"+expense.toFixed(2)+"\nSaldo: R$"+balance.toFixed(2)+"\n\nTransações:\n"+lista}],"Você é um consultor financeiro. Gere resumos em português.");
     setResumo(reply);setResumoLoading(false);
   };
@@ -380,13 +566,16 @@ export default function App() {
   const addTx=async()=>{
     const v=parseFloat(form.value);if(!form.descricao||isNaN(v)||v<=0)return;
     setSavingTx(true);
-    try{const isIncome=INCOME_CATS.includes(form.cat);await saveTx({date:form.date,descricao:form.descricao,cat:form.cat,value:isIncome?Math.abs(v):-Math.abs(v),type:isIncome?"in":"out",src:"manual"});setForm(f=>({...f,descricao:"",value:""}));}
-    catch(e){console.error(e);}finally{setSavingTx(false);}
+    try{
+      const isIncome=INCOME_CATS.includes(form.cat);
+      await saveTx({date:form.date,data_compra:form.data_compra||null,descricao:form.descricao,cat:form.cat,value:isIncome?Math.abs(v):-Math.abs(v),type:isIncome?"in":"out",src:"manual",conta:form.conta,status:form.status});
+      setForm(f=>({...f,descricao:"",value:"",conta:"",data_compra:""}));
+    }catch(e){console.error(e);}finally{setSavingTx(false);}
   };
 
   const toggleMic=()=>{
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR){alert("Use o Chrome para reconhecimento de voz.");return;}
+    if(!SR){alert("Use o Chrome para voz.");return;}
     if(isListening){recognitionRef.current?.stop();setIsListening(false);return;}
     const rec=new SR();rec.lang="pt-BR";rec.continuous=false;rec.interimResults=false;
     rec.onstart=()=>setIsListening(true);rec.onend=()=>setIsListening(false);rec.onerror=()=>setIsListening(false);
@@ -395,13 +584,15 @@ export default function App() {
       const history=[...chatLog,{role:"user",content:transcript}];
       setChatLog(history);setChatBusy(true);
       const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)).join("\n");
-      const system="Você é a Finn, assistente financeira. Hoje é "+new Date().toLocaleDateString("pt-BR")+". Responda em português, seja concisa.\nDados: Receitas R$"+income.toFixed(2)+" Despesas R$"+expense.toFixed(2)+" Saldo R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
+      const today=new Date().toLocaleDateString("pt-BR");
+      const system="Você é a Finn. Hoje é "+today+". Responda em português, seja concisa.\nDados: Receitas R$"+income.toFixed(2)+" Despesas R$"+expense.toFixed(2)+" Saldo R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
       aiCall(history.map(m=>({role:m.role,content:m.content})),system).then(async reply=>{
         let r=reply||"IA não disponível.";
         const jm=r.match(/<<<({.*?})>>>/s);
-        if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual"});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}
+        if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:"",status:"efetivado"});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}
         setChatLog(p=>[...p,{role:"assistant",content:r}]);setChatBusy(false);
-      }).catch(()=>{setChatLog(p=>[...p,{role:"assistant",content:"Erro de conexão."}]);setChatBusy(false);});
+        supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});
+      }).catch(()=>{setChatLog(p=>[...p,{role:"assistant",content:"Erro."}]);setChatBusy(false);});
     };
     recognitionRef.current=rec;rec.start();
   };
@@ -411,14 +602,14 @@ export default function App() {
     const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+(t.type==="in"?"entrada":"saída")+")").join("\n");
     const history=[...chatLog,{role:"user",content:msg}];
     setChatLog(history);setChatIn("");setChatBusy(true);
-    // Save user message
     supabase.from("chat_history").insert([{user_id:session.user.id,role:"user",content:msg}]).then(()=>{});
-    const system="Você é a Finn, assistente financeira de um casal. Hoje é "+new Date().toLocaleDateString("pt-BR")+". Seja concisa e amigável, responda em português. Sempre use a data de hoje nos registros.\nPeríodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar transação, inclua no final: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
+    const today=new Date().toLocaleDateString("pt-BR");
+    const system="Você é a Finn, assistente financeira de um casal. Hoje é "+today+". Seja concisa e amigável, responda em português. Sempre use a data de hoje nos registros.\nPeríodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar transação, inclua no final: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
     try{
-      const reply=await aiCall(history.map(m=>({role:m.role,content:m.content})),system)||"A Finn IA não está ativa. Adicione REACT_APP_ANTHROPIC_KEY no Vercel.";
+      const reply=await aiCall(history.map(m=>({role:m.role,content:m.content})),system)||"A Finn IA não está ativa.";
       let r=reply;
       const jm=r.match(/<<<({.*?})>>>/s);
-      if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual"});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}
+      if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:"",status:"efetivado"});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}
       setChatLog(p=>[...p,{role:"assistant",content:r}]);
       supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});
     }catch{setChatLog(p=>[...p,{role:"assistant",content:"Erro de conexão."}]);}
@@ -427,18 +618,24 @@ export default function App() {
 
   const saveGoals=()=>{const merged={...goals,...goalDraft};setGoals(merged);try{localStorage.setItem("finn_goals",JSON.stringify(merged));}catch{}setEditGoals(false);setGoalDraft({});};
 
-  const shown=filterSrc==="all"?txs:txs.filter(t=>t.src===filterSrc);
+  const shown=txs.filter(t=>{
+    const srcOk=filterSrc==="all"||t.src===filterSrc;
+    const contaOk=filterConta==="all"||t.conta===filterConta;
+    return srcOk&&contaOk;
+  });
+
   const card={background:T.card,borderRadius:16,padding:16,boxShadow:T.shadow,border:"1px solid "+T.border,marginBottom:12};
   const inp={width:"100%",padding:"12px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",boxShadow:"inset 0 1px 3px rgba(0,0,0,.04)",transition:"border-color .15s"};
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
-  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"txns",icon:"📋",label:"Extrato"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
+  const sel={...inp,padding:"10px 14px"};
+  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
 
   if(!authReady)return <div style={{minHeight:"100vh",background:T.dark,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontFamily:F,fontSize:16}}>Carregando...</div>;
   if(!session)return <LoginScreen/>;
 
   return (
     <div style={{fontFamily:F,background:T.bg,color:T.dark,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative",paddingBottom:76}}>
-      {editTx&&<EditModal tx={editTx} onSave={updateTx} onClose={()=>setEditTx(null)}/>}
+      {editTx&&<EditModal tx={editTx} onSave={updateTx} onClose={()=>setEditTx(null)} accounts={accounts}/>}
 
       <div style={{background:T.dark,padding:"14px 18px",position:"sticky",top:0,zIndex:10}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -459,10 +656,16 @@ export default function App() {
       <div style={{padding:"14px 14px 0"}}>
 
         {page==="home"&&<>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,overflowX:"auto",paddingBottom:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,overflowX:"auto",paddingBottom:2}}>
             <button onClick={()=>setSelMonth("all")} style={{padding:"6px 14px",borderRadius:99,border:"1.5px solid "+(selMonth==="all"?T.accent:T.border),background:selMonth==="all"?T.accentLt:"transparent",color:selMonth==="all"?T.accent:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Todos</button>
             {availableMonths.map(m=>{const[y,mo]=m.split("-").map(Number);return <button key={m} onClick={()=>setSelMonth(m)} style={{padding:"6px 14px",borderRadius:99,border:"1.5px solid "+(selMonth===m?T.accent:T.border),background:selMonth===m?T.accentLt:"transparent",color:selMonth===m?T.accent:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{MONTHS_PT[mo-1].slice(0,3)} {y}</button>;})}
           </div>
+
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,overflowX:"auto",paddingBottom:2}}>
+            <button onClick={()=>setFilterConta("all")} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta==="all"?T.green:T.border),background:filterConta==="all"?T.greenLt:"transparent",color:filterConta==="all"?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Todas</button>
+            {accounts.filter(a=>a.ativo).map(a=><button key={a.id} onClick={()=>setFilterConta(filterConta===a.nome?"all":a.nome)} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta===a.nome?T.green:T.border),background:filterConta===a.nome?T.greenLt:"transparent",color:filterConta===a.nome?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{a.nome}</button>)}
+          </div>
+
           {loadingTxs&&<div style={{textAlign:"center",padding:32,color:T.sub,fontSize:14}}>Carregando...</div>}
           {!loadingTxs&&<>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
@@ -476,6 +679,7 @@ export default function App() {
                 </div>
               ))}
             </div>
+
             <div style={{...card,padding:14,marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                 <span style={{fontSize:13,fontWeight:700}}>🐷 Taxa de Poupança</span>
@@ -491,6 +695,12 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* Export button */}
+            <button onClick={()=>exportToExcel(filteredTxs,selMonth)} style={{width:"100%",marginBottom:12,padding:"12px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:13,fontWeight:700,color:T.dark,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              📥 Exportar relatório CSV — {monthLabel}
+            </button>
+
             {catData.length>0&&<div style={card}>
               <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>💸 Gastos por categoria</div>
               <div style={{display:"flex",alignItems:"center",gap:16}}>
@@ -521,33 +731,31 @@ export default function App() {
                 {editGoals?"Fechar metas":"Editar metas"}
               </button>
               {editGoals&&<div style={{marginTop:12,borderTop:"1px solid "+T.border,paddingTop:12}}>
-                <div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:10}}>META MENSAL POR CATEGORIA (R$)</div>
+                <div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:10}}>META MENSAL (R$)</div>
                 {EXPENSE_CATS.map(c=>(
                   <div key={c} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                     <span style={{fontSize:13,flex:1}}>{CATS[c].icon} {c}</span>
-                    <input type="number" defaultValue={goals[c]||""} placeholder="0"
-                      onChange={e=>setGoalDraft(g=>({...g,[c]:parseFloat(e.target.value)||0}))}
-                      style={{width:90,padding:"6px 10px",border:"1.5px solid "+T.border,borderRadius:8,fontFamily:M,fontSize:13,outline:"none",textAlign:"right"}}/>
+                    <input type="number" defaultValue={goals[c]||""} placeholder="0" onChange={e=>setGoalDraft(g=>({...g,[c]:parseFloat(e.target.value)||0}))} style={{width:90,padding:"6px 10px",border:"1.5px solid "+T.border,borderRadius:8,fontFamily:M,fontSize:13,outline:"none",textAlign:"right"}}/>
                   </div>
                 ))}
                 <button onClick={saveGoals} style={{width:"100%",marginTop:8,padding:"11px",background:T.accent,color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer"}}>Salvar metas</button>
               </div>}
             </div>}
+
             {incomeData.length>0&&<div style={card}>
               <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>💰 Receitas por origem</div>
               <div style={{display:"flex",alignItems:"center",gap:16}}>
                 <Donut segs={incomeData.map(d=>({val:d.val,color:d.color}))} size={80}/>
-                <div style={{flex:1}}>
-                  {incomeData.map(d=>(
-                    <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
-                      <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
-                      <span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span>
-                      <span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>R${d.val.toFixed(0)}</span>
-                    </div>
-                  ))}
-                </div>
+                <div style={{flex:1}}>{incomeData.map(d=>(
+                  <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                    <div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/>
+                    <span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span>
+                    <span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>R${d.val.toFixed(0)}</span>
+                  </div>
+                ))}</div>
               </div>
             </div>}
+
             {selMonth!=="all"&&<div style={card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:resumo?12:0}}>
                 <span style={{fontWeight:700,fontSize:14}}>📝 Resumo de {monthLabel}</span>
@@ -557,10 +765,11 @@ export default function App() {
               </div>
               {resumo&&<div style={{fontSize:13,lineHeight:1.6,color:T.dark,whiteSpace:"pre-wrap",padding:"12px",background:T.bg,borderRadius:10,marginTop:8}}>{resumo}</div>}
             </div>}
+
             <div style={card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                 <span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span>
-                <button onClick={()=>setPage("txns")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver todas</button>
+                <button onClick={()=>setPage("contas")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver extrato</button>
               </div>
               {filteredTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação neste período.</div>}
               {filteredTxs.slice(0,6).map((t,i)=>(
@@ -568,7 +777,7 @@ export default function App() {
                   <div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
-                    <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}</div>
+                    <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.conta?" - "+t.conta:""}</div>
                   </div>
                   <span style={{fontSize:14,fontWeight:700,color:t.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}R${Math.abs(Number(t.value)).toFixed(2)}</span>
                 </div>
@@ -577,12 +786,24 @@ export default function App() {
           </>}
         </>}
 
-        {page==="txns"&&<>
+        {page==="contas"&&<>
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            <button onClick={()=>setPage("extrato")} style={{flex:1,padding:"10px",borderRadius:10,border:"1.5px solid "+T.border,background:T.surface,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",color:T.dark}}>📋 Extrato</button>
+            <button onClick={()=>setPage("accounts")} style={{flex:1,padding:"10px",borderRadius:10,border:"1.5px solid "+T.accent,background:T.accentLt,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",color:T.accent}}>🏦 Contas</button>
+          </div>
+          <AccountsPage accounts={accounts} setAccounts={setAccounts}/>
+        </>}
+
+        {page==="extrato"&&<>
           <div style={{fontWeight:800,fontSize:18,marginBottom:12}}>Extrato <span style={{fontSize:13,fontWeight:500,color:T.sub}}>({shown.length})</span></div>
-          <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:4}}>
+          <div style={{display:"flex",gap:6,marginBottom:8,overflowX:"auto",paddingBottom:4}}>
             {["all","manual","OFX","CSV","modelo"].map(f=>(
               <button key={f} onClick={()=>setFilterSrc(f)} style={{padding:"6px 14px",borderRadius:99,border:"1.5px solid "+(filterSrc===f?T.accent:T.border),background:filterSrc===f?T.accentLt:"transparent",color:filterSrc===f?T.accent:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{f==="all"?"Todos":f}</button>
             ))}
+          </div>
+          <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:4}}>
+            <button onClick={()=>setFilterConta("all")} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta==="all"?T.green:T.border),background:filterConta==="all"?T.greenLt:"transparent",color:filterConta==="all"?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Todas</button>
+            {accounts.filter(a=>a.ativo).map(a=><button key={a.id} onClick={()=>setFilterConta(filterConta===a.nome?"all":a.nome)} style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid "+(filterConta===a.nome?T.green:T.border),background:filterConta===a.nome?T.greenLt:"transparent",color:filterConta===a.nome?T.green:T.sub,fontFamily:F,fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{a.nome}</button>)}
           </div>
           <div style={card}>
             {shown.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação encontrada.</div>}
@@ -591,7 +812,13 @@ export default function App() {
                 <div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
-                  <div style={{fontSize:11,color:T.sub,marginTop:1,display:"flex",alignItems:"center",gap:5}}>{t.date} - <span style={{color:CATS[t.cat]?.color||T.sub}}>{t.cat}</span> - <SrcBadge src={t.src}/></div>
+                  <div style={{fontSize:11,color:T.sub,marginTop:1,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+                    <span>{t.date}</span>
+                    {t.data_compra&&t.data_compra!==t.date&&<span style={{color:T.yellow}}>compra:{t.data_compra}</span>}
+                    <span style={{color:CATS[t.cat]?.color||T.sub}}>{t.cat}</span>
+                    {t.conta&&<SrcBadge src={t.conta.split(" ")[0]}/>}
+                    {t.status==="pendente"&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:T.yellowLt,color:"#c2880a",fontWeight:700}}>pendente</span>}
+                  </div>
                 </div>
                 <span style={{fontSize:13,fontWeight:700,color:t.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}R${Math.abs(Number(t.value)).toFixed(2)}</span>
                 <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
@@ -616,8 +843,21 @@ export default function App() {
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
             <div><label style={lbl}>Valor (R$)</label><input type="number" style={inp} placeholder="0,00" value={form.value} onChange={e=>setForm(f=>({...f,value:e.target.value}))}/></div>
-            <div><label style={lbl}>Data</label><input type="date" style={inp} value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div>
+            <div><label style={lbl}>Data Pgto</label><input type="date" style={inp} value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div>
           </div>
+          <div style={{marginBottom:12}}>
+            <label style={lbl}>Conta / Cartão</label>
+            <select style={sel} value={form.conta} onChange={e=>setForm(f=>({...f,conta:e.target.value}))}>
+              <option value="">-- Selecione --</option>
+              {accounts.filter(a=>a.ativo).map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}
+            </select>
+          </div>
+          {form.conta&&accounts.find(a=>a.nome===form.conta)?.tipo==="credito"&&(
+            <div style={{marginBottom:12}}>
+              <label style={lbl}>Data da Compra (opcional)</label>
+              <input type="date" style={inp} value={form.data_compra} onChange={e=>setForm(f=>({...f,data_compra:e.target.value}))}/>
+            </div>
+          )}
           <div style={{marginBottom:18}}>
             <label style={lbl}>Categoria</label>
             <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -633,7 +873,7 @@ export default function App() {
 
         {page==="import"&&<>
           <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>Importar</div>
-          <p style={{color:T.sub,fontSize:13,margin:"0 0 14px"}}>OFX · CSV · Modelo Finn (.csv)</p>
+          <p style={{color:T.sub,fontSize:13,margin:"0 0 14px"}}>OFX · CSV · Modelo Finn</p>
           <div onClick={()=>!importing&&fileRef.current?.click()} style={{border:"2px dashed "+(importing?T.accent:T.border),borderRadius:16,padding:32,textAlign:"center",cursor:importing?"default":"pointer",background:T.card,marginBottom:14}}>
             <div style={{fontSize:40,marginBottom:10}}>{importing?"🤖":"📤"}</div>
             <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>{importing?"Processando...":"Toque para selecionar"}</div>
@@ -641,7 +881,7 @@ export default function App() {
             <input ref={fileRef} type="file" accept=".ofx,.csv,.txt" multiple style={{display:"none"}} onChange={handleFiles}/>
           </div>
           <div style={{...card,background:hasAI?T.accentLt:"#f8f8f8",border:"1px solid "+(hasAI?T.accent+"33":T.border)}}>
-            <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:hasAI?T.accent:T.sub}}>🤖 Recategorizar transações</div>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:hasAI?T.accent:T.sub}}>🤖 Recategorizar todas as transações</div>
             <div style={{fontSize:12,color:T.sub,marginBottom:12}}>A IA vai reclassificar todas as {txs.length} transações.</div>
             <button onClick={recategorizarTudo} disabled={recatLoading||!hasAI} style={{width:"100%",padding:"12px",background:hasAI?T.accent:"#ccc",color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:14,fontWeight:700,cursor:hasAI?"pointer":"default",opacity:recatLoading?0.7:1}}>
               {!hasAI?"Requer chave Anthropic":recatLoading?"Recategorizando...":"Recategorizar tudo com IA"}
