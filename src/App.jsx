@@ -175,7 +175,7 @@ function parseBudgetCSV(text) {
     s = s.trim();
     if (s.length===7&&s[4]==='-') return s;
     if (s.length===7&&s[2]==='/') return s.slice(3)+'-'+s.slice(0,2);
-    const parts = s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').split(' ').filter(Boolean);
+    const parts = s.toLowerCase().split(' ').filter(Boolean);
     const mi = MNAMES.findIndex(m=>parts[0]&&parts[0].startsWith(m.slice(0,3)));
     const yr = parts.find(p=>p.length===4&&Number(p)>2000);
     return (mi>=0&&yr)?yr+'-'+String(mi+1).padStart(2,'0'):s;
