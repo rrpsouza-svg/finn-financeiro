@@ -193,43 +193,51 @@ function parseBudgetCSV(text) {
 function buildProjection(txs, budget) {
   const now = new Date();
   const currentMes = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
-  // Find last pending installment date
-  const futureTxs = txs.filter(t=>t.date>currentMes||t.fatura_mes>currentMes);
-  const lastDate = futureTxs.reduce((max,t)=>{
+  // Find last pending/future transaction date
+  const lastDate = txs.reduce((max,t)=>{
     const d = t.fatura_mes||t.date?.slice(0,7)||"";
     return d>max?d:max;
   }, currentMes);
-  // Add 1 extra month buffer
   const [ly,lm] = lastDate.split("-").map(Number);
   const endDate = new Date(ly, lm, 1);
-  const endMes = endDate.getFullYear()+"-"+String(endDate.getMonth()+1).padStart(2,"0");
   // Build month range from current to end
   const months = [];
   let cur = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-  while (cur<=end) {
+  while (cur<=endDate) {
     months.push(cur.getFullYear()+"-"+String(cur.getMonth()+1).padStart(2,"0"));
     cur.setMonth(cur.getMonth()+1);
   }
   return months.map(mes=>{
-    // Real transactions for this month
     const mtxs = txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes);
-    const realRec  = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
-    const realDesp = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
-    const pendDesp = mtxs.filter(t=>t.type==="out"&&t.status==="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-    const efectDesp= mtxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-    // Budget for this month
+    const isPast = mes < currentMes;
+    const isCurrent = mes === currentMes;
+    const realRec   = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
+    const efectDesp = mtxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+    const pendDesp  = mtxs.filter(t=>t.type==="out"&&t.status==="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
     const bMes = budget.filter(b=>b.mes===mes);
     const budgRec  = bMes.filter(b=>b.tipo?.toLowerCase().includes("receit")).reduce((a,b)=>a+Number(b.valor),0);
     const budgDesp = bMes.filter(b=>b.tipo?.toLowerCase().includes("desp")).reduce((a,b)=>a+Number(b.valor),0);
     const [y,m] = mes.split("-").map(Number);
-    const isPast = mes < currentMes;
-    const isCurrent = mes === currentMes;
-    return {mes, label:MONTHS_PT[m-1].slice(0,3)+" "+String(y).slice(2), isPast, isCurrent,
-      realRec, efectDesp, pendDesp, budgRec, budgDesp,
-      totalRec: isPast?realRec:budgRec||realRec,
-      totalDesp: isPast?(efectDesp+pendDesp):(pendDesp+budgDesp||efectDesp+pendDesp),
-    };
+    let totalRec, totalDesp;
+    if (isPast) {
+      // Past: only real data
+      totalRec  = realRec;
+      totalDesp = efectDesp + pendDesp;
+    } else if (isCurrent) {
+      // Current: receipt = real if received, else budget (not sum)
+      totalRec = realRec > 0 ? realRec : budgRec;
+      // Expense: already committed (efetivado+pendente) + budget remainder if any
+      const committed = efectDesp + pendDesp;
+      const budgRemainder = Math.max(0, budgDesp - committed);
+      totalDesp = committed + budgRemainder;
+    } else {
+      // Future: receipt = budget; expense = max(pendente, budget) — never double count
+      totalRec  = budgRec;
+      // If pending already exceeds budget, use pending; else use budget (which includes pending)
+      totalDesp = Math.max(pendDesp, budgDesp);
+    }
+    return {mes, label:MONTHS_PT[m-1].slice(0,3)+" "+String(y).slice(2),
+      isPast, isCurrent, realRec, efectDesp, pendDesp, budgRec, budgDesp, totalRec, totalDesp};
   });
 }
 
@@ -405,6 +413,116 @@ function LoginScreen() {
   const hl=async()=>{if(!email||!pass)return;setLoading(true);setMsg(null);const{error}=await supabase.auth.signInWithPassword({email,password:pass});if(error)setMsg("E-mail ou senha incorretos.");setLoading(false);};
   const hf=async()=>{if(!email)return;setLoading(true);await supabase.auth.resetPasswordForEmail(email);setMsg("Enviado!");setLoading(false);};
   return(<div style={{minHeight:"100vh",background:T.dark,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:F}}><div style={{width:"100%",maxWidth:360}}><div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:42,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>finn<span style={{color:T.accent}}>.</span></div><div style={{fontSize:13,color:"#8b93b0",marginTop:4}}>controle financeiro do casal</div></div><div style={{background:T.surface,borderRadius:20,padding:24,boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}><div style={{fontSize:17,fontWeight:800,marginBottom:20}}>{forgot?"Recuperar senha":"Entrar"}</div><label style={{fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6}}>E-mail</label><input style={inp} type="email" placeholder="seu@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(forgot?hf():hl())}/>{!forgot&&<><label style={{fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6}}>Senha</label><input style={inp} type="password" placeholder="..." value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&hl()}/></>}{msg&&<div style={{padding:"10px 12px",borderRadius:10,background:msg.startsWith("Env")?T.greenLt:T.redLt,color:msg.startsWith("Env")?"#15a360":T.red,fontSize:13,marginBottom:12}}>{msg}</div>}<button onClick={forgot?hf:hl} disabled={loading} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer",opacity:loading?0.7:1}}>{loading?"Aguarde...":forgot?"Enviar":"Entrar"}</button><button onClick={()=>{setForgot(!forgot);setMsg(null);}} style={{width:"100%",marginTop:12,background:"none",border:"none",color:T.sub,fontSize:12,cursor:"pointer",fontFamily:F}}>{forgot?"Voltar":"Esqueci minha senha"}</button></div><div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#8b93b0"}}>Acesso restrito</div></div></div>);
+}
+
+function BudgetPage({budget,setBudget}) {
+  const [editRow,setEditRow]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [newRow,setNewRow]=useState(null);
+  const MONTHS_MAP=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const inp={width:"100%",padding:"9px 12px",border:"2px solid "+T.border,borderRadius:8,fontFamily:F,fontSize:13,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff"};
+  const lbl={fontSize:10,fontWeight:700,color:T.sub,display:"block",marginBottom:4,textTransform:"uppercase",letterSpacing:.5};
+
+  const saveRow=async(row)=>{
+    setSaving(true);
+    if(row.id){
+      const{data}=await supabase.from("budget").update({mes:row.mes,tipo:row.tipo,categoria:row.categoria,descricao:row.descricao,valor:row.valor}).eq("id",row.id).select().single();
+      if(data)setBudget(p=>p.map(b=>b.id===row.id?data:b));
+    } else {
+      const{data}=await supabase.from("budget").insert([{mes:row.mes,tipo:row.tipo,categoria:row.categoria,descricao:row.descricao,valor:row.valor}]).select().single();
+      if(data)setBudget(p=>[...p,data].sort((a,b)=>a.mes.localeCompare(b.mes)));
+    }
+    setEditRow(null);setNewRow(null);setSaving(false);
+  };
+
+  const deleteRow=async(id)=>{
+    await supabase.from("budget").delete().eq("id",id);
+    setBudget(p=>p.filter(b=>b.id!==id));
+  };
+
+  const grouped={};
+  budget.forEach(b=>{if(!grouped[b.mes])grouped[b.mes]=[];grouped[b.mes].push(b);});
+  const sortedMes=Object.keys(grouped).sort();
+
+  const EditForm=({row,onSave,onCancel})=>{
+    const [form,setForm]=useState({...row});
+    const now=new Date();
+    const mesOpts=Array.from({length:24},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()+i-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
+    return(<div style={{background:T.accentLt,borderRadius:10,padding:12,marginBottom:8,border:"1px solid "+T.accent+"44"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={lbl}>Mês</label>
+          <select style={inp} value={form.mes} onChange={e=>setForm(f=>({...f,mes:e.target.value}))}>
+            {mesOpts.map(m=>{const[y,mo]=m.split("-").map(Number);return<option key={m} value={m}>{MONTHS_MAP[mo-1]} {y}</option>;})}
+          </select>
+        </div>
+        <div><label style={lbl}>Tipo</label>
+          <select style={inp} value={form.tipo} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))}>
+            <option value="Receita">Receita</option>
+            <option value="Despesa">Despesa</option>
+          </select>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <div><label style={lbl}>Categoria</label>
+          <select style={inp} value={form.categoria} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))}>
+            {CAT_LIST.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div><label style={lbl}>Valor (R$)</label>
+          <input type="number" style={inp} value={form.valor} onChange={e=>setForm(f=>({...f,valor:parseFloat(e.target.value)||0}))}/>
+        </div>
+      </div>
+      <div style={{marginBottom:10}}><label style={lbl}>Descrição</label>
+        <input style={inp} value={form.descricao} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} placeholder="Ex: Salário Maio"/>
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onCancel} style={{flex:1,padding:"8px",background:T.surface,border:"1px solid "+T.border,borderRadius:8,fontFamily:F,fontSize:12,cursor:"pointer",color:T.sub}}>Cancelar</button>
+        <button onClick={()=>onSave(form)} disabled={saving} style={{flex:2,padding:"8px",background:T.accent,color:"#fff",border:"none",borderRadius:8,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",opacity:saving?0.7:1}}>Salvar</button>
+      </div>
+    </div>);
+  };
+
+  return(<div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+      <div><div style={{fontWeight:800,fontSize:18}}>Orçamento</div><div style={{fontSize:12,color:T.sub,marginTop:2}}>{budget.length} linhas cadastradas</div></div>
+      <button onClick={()=>setNewRow({mes:new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0"),tipo:"Despesa",categoria:"Outros",descricao:"",valor:0})} style={{padding:"8px 14px",background:T.accent,color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nova linha</button>
+    </div>
+    {newRow&&<EditForm row={newRow} onSave={saveRow} onCancel={()=>setNewRow(null)}/>}
+    {budget.length===0&&<div style={{textAlign:"center",padding:32,color:T.sub,fontSize:13}}>Nenhum orçamento cadastrado.<br/>Importe um arquivo ou adicione linhas manualmente.</div>}
+    {sortedMes.map(mes=>{
+      const[y,m]=mes.split("-").map(Number);
+      const rec=grouped[mes].filter(b=>b.tipo?.toLowerCase().includes("receit")).reduce((a,b)=>a+Number(b.valor),0);
+      const desp=grouped[mes].filter(b=>b.tipo?.toLowerCase().includes("desp")).reduce((a,b)=>a+Number(b.valor),0);
+      return(<div key={mes} style={{marginBottom:12,background:T.card,borderRadius:14,border:"1px solid "+T.border,overflow:"hidden",boxShadow:T.shadow}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:T.bg,borderBottom:"1px solid "+T.border}}>
+          <span style={{fontWeight:700,fontSize:13}}>{MONTHS_MAP[m-1]} {y}</span>
+          <div style={{display:"flex",gap:12,fontSize:11}}>
+            <span style={{color:T.green,fontWeight:700}}>+R${rec.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+            <span style={{color:T.red,fontWeight:700}}>{"-R$"+desp.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+          </div>
+        </div>
+        {grouped[mes].map((b,i)=>(
+          <div key={b.id}>
+            {editRow?.id===b.id
+              ? <div style={{padding:"8px 12px"}}><EditForm row={editRow} onSave={saveRow} onCancel={()=>setEditRow(null)}/></div>
+              : <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",borderTop:i>0?"1px solid "+T.border:"none"}}>
+                  <div style={{width:8,height:8,borderRadius:99,background:b.tipo?.toLowerCase().includes("receit")?T.green:T.red,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.descricao||b.categoria}</div>
+                    <div style={{fontSize:10,color:T.sub}}>{b.categoria}</div>
+                  </div>
+                  <span style={{fontSize:12,fontWeight:700,color:b.tipo?.toLowerCase().includes("receit")?T.green:T.red,fontFamily:M,flexShrink:0}}>
+                    {b.tipo?.toLowerCase().includes("receit")?"+":"-"}{"R$"+Number(b.valor).toLocaleString("pt-BR",{minimumFractionDigits:2})}
+                  </span>
+                  <button onClick={()=>setEditRow({...b})} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:14,padding:"0 2px"}}>✏️</button>
+                  <button onClick={()=>deleteRow(b.id)} style={{background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,padding:"0 2px"}}>🗑️</button>
+                </div>
+            }
+          </div>
+        ))}
+      </div>);
+    })}
+  </div>);
 }
 
 function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
@@ -583,9 +701,9 @@ export default function App() {
 
   const addTx=async()=>{const v=parseFloat(form.value);if(!form.descricao||isNaN(v)||v<=0)return;setSavingTx(true);try{const isIncome=INCOME_CATS.includes(form.cat);await saveTx({date:form.date,data_compra:form.data_compra||null,descricao:form.descricao,cat:form.cat,value:isIncome?Math.abs(v):-Math.abs(v),type:isIncome?"in":"out",src:"manual",conta:form.conta,status:form.status,fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});setForm(f=>({...f,descricao:"",value:"",conta:"",data_compra:""}));}catch(e){console.error(e);}finally{setSavingTx(false);}};
 
-  const toggleMic=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Use o Chrome.");return;}if(isListening){recognitionRef.current?.stop();setIsListening(false);return;}const rec=new SR();rec.lang="pt-BR";rec.continuous=false;rec.interimResults=false;rec.onstart=()=>setIsListening(true);rec.onend=()=>setIsListening(false);rec.onerror=()=>setIsListening(false);rec.onresult=(e)=>{const t=e.results[0][0].transcript;const history=[...chatLog,{role:"user",content:t}];setChatLog(history);setChatBusy(true);const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)).join("\n");const today=new Date().toLocaleDateString("pt-BR");const system="Você é a Finn. Hoje é "+today+". Responda em português.\nDados: Receitas R$"+income.toFixed(2)+" Despesas R$"+expense.toFixed(2)+" Saldo R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";aiCall(history.map(m=>({role:m.role,content:m.content})),system).then(async reply=>{let r=reply||"IA não disponível.";const jm=r.match(/<<<({.*?})>>>/s);if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:"",status:"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}setChatLog(p=>[...p,{role:"assistant",content:r}]);setChatBusy(false);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});}).catch(()=>{setChatLog(p=>[...p,{role:"assistant",content:"Erro."}]);setChatBusy(false);});};recognitionRef.current=rec;rec.start();};
+  const toggleMic=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Use o Chrome.");return;}if(isListening){recognitionRef.current?.stop();setIsListening(false);return;}const rec=new SR();rec.lang="pt-BR";rec.continuous=false;rec.interimResults=false;rec.onstart=()=>setIsListening(true);rec.onend=()=>setIsListening(false);rec.onerror=()=>setIsListening(false);rec.onresult=(e)=>{const t=e.results[0][0].transcript;const history=[...chatLog,{role:"user",content:t}];setChatLog(history);setChatBusy(true);const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)).join("\n");const today=new Date().toLocaleDateString("pt-BR");const system="Você é a Finn. Hoje é "+today+". Responda em português.\nDados: Receitas R$"+income.toFixed(2)+" Despesas R$"+expense.toFixed(2)+" Saldo R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";aiCall(history.map(m=>({role:m.role,content:m.content})),system).then(async reply=>{let r=reply||"IA não disponível.";const jm=r.match(/<<<({.*?})>>>/s);if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:"",status:"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}const bm=r.match(/<<<BUDGET:(\[.*?\])>>>/s);if(bm){try{const ba=JSON.parse(bm[1]);await supabase.from("budget").delete().neq("id","00000000-0000-0000-0000-000000000000");const{data:bd}=await supabase.from("budget").insert(ba).select();if(bd)setBudget(bd);r=r.replace(/<<<BUDGET:.*?>>>/s,"").trim()+"\n\n✅ Orçamento atualizado com "+ba.length+" linhas.";}catch{}}setChatLog(p=>[...p,{role:"assistant",content:r}]);setChatBusy(false);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});}).catch(()=>{setChatLog(p=>[...p,{role:"assistant",content:"Erro."}]);setChatBusy(false);});};recognitionRef.current=rec;rec.start();};
 
-  const sendChat=async()=>{const msg=chatIn.trim();if(!msg||chatBusy)return;const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+(t.type==="in"?"entrada":"saída")+")").join("\n");const history=[...chatLog,{role:"user",content:msg}];setChatLog(history);setChatIn("");setChatBusy(true);supabase.from("chat_history").insert([{user_id:session.user.id,role:"user",content:msg}]).then(()=>{});const today=new Date().toLocaleDateString("pt-BR");const system="Você é a Finn, assistente financeira de um casal. Hoje é "+today+". Seja concisa e amigável, responda em português.\nPeríodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";try{const reply=await aiCall(history.map(m=>({role:m.role,content:m.content})),system)||"Finn IA não está ativa.";let r=reply;const jm=r.match(/<<<({.*?})>>>/s);if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:"",status:"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}setChatLog(p=>[...p,{role:"assistant",content:r}]);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});}catch{setChatLog(p=>[...p,{role:"assistant",content:"Erro de conexão."}]);}setChatBusy(false);};
+  const sendChat=async()=>{const msg=chatIn.trim();if(!msg||chatBusy)return;const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+(t.type==="in"?"entrada":"saída")+")").join("\n");const history=[...chatLog,{role:"user",content:msg}];setChatLog(history);setChatIn("");setChatBusy(true);supabase.from("chat_history").insert([{user_id:session.user.id,role:"user",content:msg}]).then(()=>{});const today=new Date().toLocaleDateString("pt-BR");const alertas=[];EXPENSE_CATS.forEach(cat=>{const spent=filteredTxs.filter(t=>t.cat===cat&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);const meta=goals[cat]||0;if(meta>0&&spent>=meta*0.8)alertas.push(cat+": "+Math.round(spent/meta*100)+"% da meta");});let rb=0;buildProjection(txs,budget).forEach(p=>{rb+=p.totalRec-p.totalDesp;if(rb<0&&!p.isPast)alertas.push("Saldo negativo em "+p.label);});const alertaStr=alertas.length>0?"\n⚠️ Alertas: "+alertas.join(", "):"";const budgCtx=budget.length>0?"\nOrçamento carregado ("+budget.length+" linhas). Para fechar um mês diga 'fechar [mês]' e ajustarei o orçamento com base no real.":"";const system="Você é a Finn, assistente financeira de um casal. Hoje é "+today+". Seja concisa e amigável.\nPeríodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+alertaStr+budgCtx+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>"try{const reply=await aiCall(history.map(m=>({role:m.role,content:m.content})),system)||"Finn IA não está ativa.";let r=reply;const jm=r.match(/<<<({.*?})>>>/s);if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:"",status:"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}setChatLog(p=>[...p,{role:"assistant",content:r}]);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});}catch{setChatLog(p=>[...p,{role:"assistant",content:"Erro de conexão."}]);}setChatBusy(false);};
 
   const saveGoals=()=>{const merged={...goals,...goalDraft};setGoals(merged);try{localStorage.setItem("finn_goals",JSON.stringify(merged));}catch{}setEditGoals(false);setGoalDraft({});};
 
@@ -701,11 +819,13 @@ export default function App() {
       </>}
 
       {page==="contas"&&<>
-        <div style={{display:"flex",gap:8,marginBottom:16}}>
-          <button onClick={()=>setPage("extrato")} style={{flex:1,padding:"10px",borderRadius:10,border:"1.5px solid "+T.border,background:T.surface,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",color:T.dark}}>📋 Extrato</button>
-          <button style={{flex:1,padding:"10px",borderRadius:10,border:"1.5px solid "+T.accent,background:T.accentLt,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer",color:T.accent}}>🏦 Contas</button>
+        <div style={{display:"flex",gap:6,marginBottom:16}}>
+          <button onClick={()=>setPage("extrato")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+T.border,background:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:T.dark}}>📋 Extrato</button>
+          <button onClick={()=>setContasTab("contas")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="contas"?T.accent:T.border),background:contasTab==="contas"?T.accentLt:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="contas"?T.accent:T.dark}}>🏦 Contas</button>
+          <button onClick={()=>setContasTab("budget")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="budget"?"#7c3aed":T.border),background:contasTab==="budget"?"#f3e8ff":T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="budget"?"#7c3aed":T.dark}}>🔮 Orçamento</button>
         </div>
-        <AccountsPage accounts={accounts} setAccounts={setAccounts} txs={txs} setTxs={setTxs} saveTx={saveTx}/>
+        {contasTab==="contas"&&<AccountsPage accounts={accounts} setAccounts={setAccounts} txs={txs} setTxs={setTxs} saveTx={saveTx}/>}
+        {contasTab==="budget"&&<BudgetPage budget={budget} setBudget={setBudget}/>}
       </>}
 
       {page==="extrato"&&<>
