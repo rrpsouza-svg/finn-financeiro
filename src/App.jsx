@@ -234,56 +234,59 @@ function buildProjection(txs, budget) {
 }
 
 function ProjectionChart({txs,budget}) {
-  const proj = buildProjection(txs,budget);
-  if (!proj.length) return <div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Sem dados para projeção.</div>;
-  const maxVal = Math.max(...proj.flatMap(p=>[p.totalRec,p.totalDesp]),1);
-  const barW=16,gap=4,groupW=barW*2+gap+6;
-  const chartH=120,totalW=proj.length*groupW;
-  // Running balance
-  let runBal=0;
-  const balances=proj.map(p=>{runBal+=(p.totalRec-p.totalDesp);return runBal;});
-  const minBal=Math.min(...balances,0),maxBal=Math.max(...balances,1);
-  const balRange=maxBal-minBal||1;
+  const proj=buildProjection(txs,budget);
+  if(!proj.length)return <div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Sem dados para projeção.</div>;
+  const maxVal=Math.max(...proj.flatMap(p=>[p.totalRec,p.totalDesp]),1);
+  const bW=16,gap=4,gW=bW*2+gap+6,cH=120;
+  const svgW=Math.max(proj.length*gW,300);
+  let rb=0;
+  const bals=proj.map(p=>{rb+=(p.totalRec-p.totalDesp);return rb;});
+  const minB=Math.min(...bals,0),maxB=Math.max(...bals,1),bRange=maxB-minB||1;
+  const fmt=n=>n.toLocaleString("pt-BR",{minimumFractionDigits:2});
   return(<div style={{overflowX:"auto",paddingBottom:4}}>
-    <svg width={Math.max(totalW,300)} height={chartH+50} style={{display:"block"}}>
-      {[0,.5,1].map((f,i)=><line key={i} x1={0} y1={f*chartH} x2={Math.max(totalW,300)} y2={f*chartH} stroke={T.border} strokeWidth={0.5}/>)}
+    <svg width={svgW} height={cH+50} style={{display:"block"}}>
+      {[0,0.5,1].map((f,i)=><rect key={i} x={0} y={Math.round(f*cH)} width={svgW} height={1} fill={T.border}/>)}
       {proj.map((p,i)=>{
-        const x=i*groupW+2;
-        const rH=maxVal>0?(p.totalRec/maxVal)*(chartH-4):0;
-        const dH=maxVal>0?(p.totalDesp/maxVal)*(chartH-4):0;
-        const balY=chartH-((balances[i]-minBal)/balRange)*(chartH-20)-10;
+        const x=i*gW+2,rH=maxVal>0?(p.totalRec/maxVal)*(cH-4):0,dH=maxVal>0?(p.totalDesp/maxVal)*(cH-4):0;
+        const by=cH-((bals[i]-minB)/bRange)*(cH-20)-10;
         return(<g key={p.mes}>
-          {p.isCurrent&&<rect x={x-1} y={0} width={groupW} height={chartH} fill={T.accent} opacity={0.06}/>}
-          <rect x={x} y={chartH-rH} width={barW} height={rH} fill={T.green} opacity={p.isPast?0.9:0.45} rx={2}/>
-          <rect x={x+barW+gap} y={chartH-dH} width={barW} height={dH} fill={p.isPast?T.red:T.yellow} opacity={p.isPast?0.9:0.5} rx={2}/>
-          <text x={x+barW} y={chartH+11} textAnchor="middle" fontSize={8} fill={p.isCurrent?T.accent:T.sub} fontFamily={F} fontWeight={p.isCurrent?700:400}>{p.label}</text>
-          <circle cx={x+barW} cy={balY} r={3} fill={balances[i]>=0?T.accent:T.red} opacity={0.8}/>
+          {p.isCurrent&&<rect x={x-1} y={0} width={gW} height={cH} fill={T.accent} opacity={0.06} />}
+          <rect x={x} y={cH-rH} width={bW} height={rH} fill={T.green} opacity={p.isPast?0.9:0.45} rx={2}/>
+          <rect x={x+bW+gap} y={cH-dH} width={bW} height={dH} fill={p.isPast?T.red:T.yellow} opacity={p.isPast?0.9:0.5} rx={2}/>
+          <text x={x+bW} y={cH+11} textAnchor="middle" fontSize={8} fill={p.isCurrent?T.accent:T.sub} fontFamily={F} fontWeight={p.isCurrent?700:400}>{p.label}</text>
+          <circle cx={x+bW} cy={by} r={3} fill={bals[i]>=0?T.accent:T.red} opacity={0.8} />
         </g>);
       })}
-      <polyline points={proj.map((p,i)=>{const x=i*groupW+2+barW;const y=chartH-((balances[i]-minBal)/balRange)*(chartH-20)-10;return x+","+y;}).join(" ")} fill="none" stroke={T.accent} strokeWidth={1.5} opacity={0.7}/>
+      <polyline points={proj.map((p,i)=>(i*gW+2+bW)+","+(cH-((bals[i]-minB)/bRange)*(cH-20)-10)).join(" ")} fill="none" stroke={T.accent} strokeWidth={2} opacity={0.7} />
     </svg>
     <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:6,flexWrap:"wrap"}}>
       {[{color:T.green,label:"Receita"},{color:T.red,label:"Despesa real"},{color:T.yellow,label:"Projeção"},{color:T.accent,label:"Saldo acumulado"}].map(l=>(
-        <div key={l.label} style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:10,height:10,borderRadius:2,background:l.color}}/><span style={{fontSize:10,color:T.sub,fontFamily:F}}>{l.label}</span></div>
+        <div key={l.label} style={{display:"flex",alignItems:"center",gap:4}}>
+          <div style={{width:10,height:10,borderRadius:2,background:l.color}}/>
+          <span style={{fontSize:10,color:T.sub}}>{l.label}</span>
+        </div>
       ))}
     </div>
-    {/* Table summary */}
     <div style={{marginTop:12,overflowX:"auto"}}>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:F}}>
         <thead><tr style={{background:T.bg}}>
-          {["Mês","Receita","Despesa","Saldo Mês","Acumulado"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"right",color:T.sub,fontWeight:700,letterSpacing:.3,whiteSpace:"nowrap"}}>{h}</th>)}
+          {["Mês","Receita","Despesa","Saldo","Acumulado"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"right",color:T.sub,fontWeight:700,whiteSpace:"nowrap"}}>{h}</th>)}
         </tr></thead>
-        <tbody>{proj.map((p,i)=>{const sal=p.totalRec-p.totalDesp;return(<tr key={p.mes} style={{background:p.isCurrent?T.accentLt:i%2===0?T.bg:"#fff",fontWeight:p.isCurrent?700:400}}>
-          <td style={{padding:"5px 8px",color:p.isPast?T.dark:T.sub,whiteSpace:"nowrap"}}>{p.label}{!p.isPast&&!p.isCurrent?<span style={{fontSize:9,color:T.yellow,marginLeft:4}}>proj</span>:null}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:T.green,fontFamily:M}}>{"R$"+p.totalRec.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:p.isPast?T.red:T.yellow,fontFamily:M}}>{"R$"+p.totalDesp.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:sal>=0?T.green:T.red,fontFamily:M}}>{(sal>=0?"+":"")+"R$"+Math.abs(sal).toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-          <td style={{padding:"5px 8px",textAlign:"right",color:balances[i]>=0?T.accent:T.red,fontFamily:M,fontWeight:700}}>{"R$"+balances[i].toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
-        </tr>);})</tbody>
+        <tbody>{proj.map((p,i)=>{
+          const sal=p.totalRec-p.totalDesp;
+          return(<tr key={p.mes} style={{background:p.isCurrent?T.accentLt:i%2===0?T.bg:"#fff",fontWeight:p.isCurrent?700:400}}>
+            <td style={{padding:"5px 8px",color:p.isPast?T.dark:T.sub,whiteSpace:"nowrap"}}>{p.label}{!p.isPast&&!p.isCurrent&&<span style={{fontSize:9,color:T.yellow,marginLeft:4}}>proj</span>}</td>
+            <td style={{padding:"5px 8px",textAlign:"right",color:T.green,fontFamily:M}}>{"R$"+fmt(p.totalRec)}</td>
+            <td style={{padding:"5px 8px",textAlign:"right",color:p.isPast?T.red:T.yellow,fontFamily:M}}>{"R$"+fmt(p.totalDesp)}</td>
+            <td style={{padding:"5px 8px",textAlign:"right",color:sal>=0?T.green:T.red,fontFamily:M}}>{(sal>=0?"+":"-")+"R$"+fmt(Math.abs(sal))}</td>
+            <td style={{padding:"5px 8px",textAlign:"right",color:bals[i]>=0?T.accent:T.red,fontFamily:M,fontWeight:700}}>{"R$"+fmt(bals[i])}</td>
+          </tr>);
+        })}</tbody>
       </table>
     </div>
   </div>);
 }
+
 
 function exportToExcel(txs,selMonth) {
   const header=["DATA_PAGAMENTO","DATA_COMPRA","DESCRICAO","VALOR","TIPO","CONTA","CATEGORIA","STATUS","PARCELA","TOTAL_PARCELAS","FONTE","USUARIO"];
@@ -321,7 +324,7 @@ function CashFlowChart({txs}) {
       <svg width={Math.max(totalW,320)} height={chartH+60} style={{display:"block"}}>
         {/* Grid lines */}
         {[0,0.25,0.5,0.75,1].map((f,i)=>(
-          <line key={i} x1={0} y1={f*chartH} x2={Math.max(totalW,320)} y2={f*chartH} stroke={T.border} strokeWidth={0.5}/>
+          <line key={i} x1={0} y1={f*chartH} x2={Math.max(totalW,320)} y2={f*chartH} stroke={T.border} strokeWidth={1}/>
         ))}
         {data.map((d,i)=>{
           const x=i*(barW*2+gap+8)+4;
@@ -331,7 +334,7 @@ function CashFlowChart({txs}) {
           const isFuture=d.key>(now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0"));
           return(
             <g key={d.key}>
-              {isCurrent&&<rect x={x-2} y={0} width={barW*2+gap+4} height={chartH} fill={T.accent} opacity={0.05}/>}
+              {isCurrent&&<rect x={x-2} y={0} width={barW*2+gap+4} height={chartH} fill={T.accent} opacity={0.05} />}
               <rect x={x} y={chartH-recH} width={barW} height={recH} fill={T.green} opacity={isFuture?0.4:0.85} rx={2}/>
               <rect x={x+barW+2} y={chartH-despH} width={barW} height={despH} fill={isFuture?T.yellow:T.red} opacity={isFuture?0.5:0.85} rx={2}/>
               <text x={x+barW} y={chartH+12} textAnchor="middle" fontSize={9} fill={T.sub} fontFamily={F}>{d.label}</text>
@@ -347,7 +350,7 @@ function CashFlowChart({txs}) {
             const y=chartH-(saldoNorm*chartH*0.8+chartH*0.1);
             return x+","+y;
           }).join(" ");
-          return<polyline points={pts} fill="none" stroke={T.accent} strokeWidth={1.5} strokeDasharray="4 2" opacity={0.7}/>;
+          return<polyline points={pts} fill="none" stroke={T.accent} strokeWidth={1.5} strokeDasharray="4 2" opacity={0.7} />;
         })()}
       </svg>
       <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:4,flexWrap:"wrap"}}>
@@ -420,9 +423,9 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:.6};
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><div><div style={{fontWeight:800,fontSize:18}}>Contas e Cartões</div><div style={{fontSize:12,color:T.sub,marginTop:2}}>{accounts.filter(a=>a.ativo).length} ativas</div></div><button onClick={()=>setEditAcc({nome:"",tipo:"CC",banco:"",saldo_inicial:0,limite:0,dia_vencimento:5,dia_fechamento:25,ativo:true})} style={{padding:"8px 14px",background:T.accent,color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nova</button></div>
-    {faturasPendentes.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>⏳ Faturas pendentes</div>{faturasPendentes.map((f,i)=>{const[y,m]=f.mes.split("-").map(Number);return(<div key={i} style={{background:T.yellowLt,borderRadius:14,padding:16,marginBottom:8,border:"1px solid #f5b54444"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>{f.conta.nome}</div><div style={{fontSize:11,color:"#c2880a",marginTop:2}}>Fatura {MONTHS_PT2[m-1]} {y} · {f.ids.length} lanç.</div></div><div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:800,color:"#c2880a",fontFamily:M}}>R${f.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div><button onClick={()=>{setPagarFatura(f);setContaDebito("");}} style={{marginTop:6,padding:"6px 12px",background:"#c2880a",color:"#fff",border:"none",borderRadius:8,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Pagar →</button></div></div></div>);})}</div>}
-    {["CC","credito","investimento"].map(tipo=>{const accs=accounts.filter(a=>a.tipo===tipo&&a.ativo);if(!accs.length)return null;return(<div key={tipo} style={{marginBottom:16}}><div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>{TIPO_ICONS[tipo]} {tipo==="CC"?"Contas Correntes":tipo==="credito"?"Cartões de Crédito":"Investimentos"}</div>{accs.map(a=>(<div key={a.id} style={{background:T.card,borderRadius:14,padding:16,marginBottom:8,boxShadow:T.shadow,border:"1px solid "+T.border}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontSize:14,fontWeight:700}}>{a.nome}</div><div style={{fontSize:11,color:T.sub,marginTop:2}}>{a.banco}</div></div><button onClick={()=>setEditAcc(a)} style={{background:T.accentLt,border:"none",borderRadius:8,padding:"6px 10px",color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F}}>Editar</button></div><div style={{display:"flex",gap:16,marginTop:12}}><div><div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Saldo inicial</div><div style={{fontSize:15,fontWeight:700,color:T.green,fontFamily:M}}>R${Number(a.saldo_inicial).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div>{a.tipo==="credito"&&<><div><div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Limite</div><div style={{fontSize:15,fontWeight:700,color:T.accent,fontFamily:M}}>R${Number(a.limite).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div><div><div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Fecha/Vence</div><div style={{fontSize:13,fontWeight:700}}>Dia {a.dia_fechamento}/{a.dia_vencimento}</div></div></>}</div></div>))}</div>);}) }
-    {pagarFatura&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}><div style={{background:T.surface,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:430}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><span style={{fontSize:16,fontWeight:800}}>Pagar Fatura</span><button onClick={()=>setPagarFatura(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub}}>x</button></div><div style={{background:T.yellowLt,borderRadius:10,padding:"12px 14px",marginBottom:20}}><div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>{pagarFatura.conta.nome}</div><div style={{fontSize:12,color:"#c2880a",marginTop:2}}>{pagarFatura.ids.length} lançamentos pendentes</div><div style={{fontSize:20,fontWeight:800,color:"#c2880a",marginTop:4,fontFamily:M}}>R${pagarFatura.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div><div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8,textTransform:"uppercase",letterSpacing:.6}}>Debitar de qual conta?</div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>{accounts.filter(a=>a.tipo==="CC"&&a.ativo).map(a=>(<button key={a.id} onClick={()=>setContaDebito(a.nome)} style={{padding:"12px 16px",borderRadius:10,border:"2px solid "+(contaDebito===a.nome?T.accent:T.border),background:contaDebito===a.nome?T.accentLt:T.surface,color:contaDebito===a.nome?T.accent:T.dark,fontFamily:F,fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"left"}}>🏦 {a.nome}</button>))}</div><button onClick={handlePagarFatura} disabled={!contaDebito||pagando} style={{width:"100%",padding:"14px",background:contaDebito?T.green:"#ccc",color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:contaDebito?"pointer":"default",opacity:pagando?0.7:1}}>{pagando?"Processando...":"✅ Confirmar pagamento"}</button><div style={{fontSize:11,color:T.sub,textAlign:"center",marginTop:10}}>Efetiva todos os lançamentos pendentes</div></div></div>}
+    {faturasPendentes.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>⏳ Faturas pendentes</div>{faturasPendentes.map((f,i)=>{const[y,m]=f.mes.split("-").map(Number);return(<div key={i} style={{background:T.yellowLt,borderRadius:14,padding:16,marginBottom:8,border:"1px solid #f5b54444"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>{f.conta.nome}</div><div style={{fontSize:11,color:"#c2880a",marginTop:2}}>Fatura {MONTHS_PT2[m-1]} {y} · {f.ids.length} lanç.</div></div><div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:800,color:"#c2880a",fontFamily:M}}>{"R$"+f.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div><button onClick={()=>{setPagarFatura(f);setContaDebito("");}} style={{marginTop:6,padding:"6px 12px",background:"#c2880a",color:"#fff",border:"none",borderRadius:8,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Pagar →</button></div></div></div>);})}</div>}
+    {["CC","credito","investimento"].map(tipo=>{const accs=accounts.filter(a=>a.tipo===tipo&&a.ativo);if(!accs.length)return null;return(<div key={tipo} style={{marginBottom:16}}><div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>{TIPO_ICONS[tipo]} {tipo==="CC"?"Contas Correntes":tipo==="credito"?"Cartões de Crédito":"Investimentos"}</div>{accs.map(a=>(<div key={a.id} style={{background:T.card,borderRadius:14,padding:16,marginBottom:8,boxShadow:T.shadow,border:"1px solid "+T.border}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontSize:14,fontWeight:700}}>{a.nome}</div><div style={{fontSize:11,color:T.sub,marginTop:2}}>{a.banco}</div></div><button onClick={()=>setEditAcc(a)} style={{background:T.accentLt,border:"none",borderRadius:8,padding:"6px 10px",color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F}}>Editar</button></div><div style={{display:"flex",gap:16,marginTop:12}}><div><div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Saldo inicial</div><div style={{fontSize:15,fontWeight:700,color:T.green,fontFamily:M}}>{"R$"+Number(a.saldo_inicial).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div>{a.tipo==="credito"&&<><div><div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Limite</div><div style={{fontSize:15,fontWeight:700,color:T.accent,fontFamily:M}}>{"R$"+Number(a.limite).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div><div><div style={{fontSize:10,color:T.sub,textTransform:"uppercase",letterSpacing:.5}}>Fecha/Vence</div><div style={{fontSize:13,fontWeight:700}}>Dia {a.dia_fechamento}/{a.dia_vencimento}</div></div></>}</div></div>))}</div>);}) }
+    {pagarFatura&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}><div style={{background:T.surface,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:430}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><span style={{fontSize:16,fontWeight:800}}>Pagar Fatura</span><button onClick={()=>setPagarFatura(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub}}>x</button></div><div style={{background:T.yellowLt,borderRadius:10,padding:"12px 14px",marginBottom:20}}><div style={{fontSize:13,fontWeight:700,color:"#8a6a00"}}>{pagarFatura.conta.nome}</div><div style={{fontSize:12,color:"#c2880a",marginTop:2}}>{pagarFatura.ids.length} lançamentos pendentes</div><div style={{fontSize:20,fontWeight:800,color:"#c2880a",marginTop:4,fontFamily:M}}>{"R$"+pagarFatura.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div><div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8,textTransform:"uppercase",letterSpacing:.6}}>Debitar de qual conta?</div><div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>{accounts.filter(a=>a.tipo==="CC"&&a.ativo).map(a=>(<button key={a.id} onClick={()=>setContaDebito(a.nome)} style={{padding:"12px 16px",borderRadius:10,border:"2px solid "+(contaDebito===a.nome?T.accent:T.border),background:contaDebito===a.nome?T.accentLt:T.surface,color:contaDebito===a.nome?T.accent:T.dark,fontFamily:F,fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"left"}}>🏦 {a.nome}</button>))}</div><button onClick={handlePagarFatura} disabled={!contaDebito||pagando} style={{width:"100%",padding:"14px",background:contaDebito?T.green:"#ccc",color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:contaDebito?"pointer":"default",opacity:pagando?0.7:1}}>{pagando?"Processando...":"✅ Confirmar pagamento"}</button><div style={{fontSize:11,color:T.sub,textAlign:"center",marginTop:10}}>Efetiva todos os lançamentos pendentes</div></div></div>}
     {editAcc&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}><div style={{background:T.surface,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><span style={{fontSize:16,fontWeight:800}}>{editAcc.id?"Editar":"Nova"} Conta</span><button onClick={()=>setEditAcc(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub}}>x</button></div><label style={lbl}>Nome</label><input style={inp} value={editAcc.nome} onChange={e=>setEditAcc(a=>({...a,nome:e.target.value}))} placeholder="Ex: Nubank Crédito"/><label style={lbl}>Banco</label><input style={inp} value={editAcc.banco} onChange={e=>setEditAcc(a=>({...a,banco:e.target.value}))} placeholder="Ex: Nubank"/><label style={lbl}>Tipo</label><select style={{...inp}} value={editAcc.tipo} onChange={e=>setEditAcc(a=>({...a,tipo:e.target.value}))}><option value="CC">Conta Corrente</option><option value="credito">Cartão de Crédito</option><option value="investimento">Investimento</option></select><label style={lbl}>Saldo Inicial (R$)</label><input type="number" style={inp} value={editAcc.saldo_inicial} onChange={e=>setEditAcc(a=>({...a,saldo_inicial:parseFloat(e.target.value)||0}))}/>{editAcc.tipo==="credito"&&<><label style={lbl}>Limite (R$)</label><input type="number" style={inp} value={editAcc.limite} onChange={e=>setEditAcc(a=>({...a,limite:parseFloat(e.target.value)||0}))}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><div><label style={lbl}>Dia Fechamento</label><input type="number" style={inp} value={editAcc.dia_fechamento} onChange={e=>setEditAcc(a=>({...a,dia_fechamento:parseInt(e.target.value)||25}))}/></div><div><label style={lbl}>Dia Vencimento</label><input type="number" style={inp} value={editAcc.dia_vencimento} onChange={e=>setEditAcc(a=>({...a,dia_vencimento:parseInt(e.target.value)||5}))}/></div></div></>}<button onClick={()=>saveAccount(editAcc)} disabled={saving} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer",marginTop:8,opacity:saving?0.7:1}}>{saving?"Salvando...":"Salvar"}</button></div></div>}
   </div>);
 }
@@ -641,7 +644,7 @@ export default function App() {
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:13,fontWeight:700}}>🐷 Taxa de Poupança</span><span style={{fontSize:16,fontWeight:800,color:savPct>=20?T.green:savPct>=10?T.yellow:T.red,fontFamily:M}}>{savPct.toFixed(1)}%</span></div>
             <div style={{height:8,background:T.border,borderRadius:99,marginBottom:expenseDiff!==null?10:0}}><div style={{height:"100%",width:Math.min(100,Math.max(0,savPct))+"%",background:savPct>=20?T.green:savPct>=10?T.yellow:T.red,borderRadius:99,transition:"width .6s"}}/></div>
             {expenseDiff!==null&&selMonth!=="all"&&<div style={{fontSize:12,color:T.sub,display:"flex",alignItems:"center",gap:6}}><span>vs mês anterior:</span><span style={{fontWeight:700,color:expenseDiff<=0?T.green:T.red}}>{expenseDiff>0?"+":""}{expenseDiff.toFixed(1)}% {expenseDiff<=0?"✅":"⚠️"}</span></div>}
-            {pendingExpense>0&&<div style={{marginTop:8,padding:"8px 10px",background:T.yellowLt,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:"#8a6a00"}}>⏳ Faturas a pagar</span><span style={{fontSize:13,fontWeight:700,color:"#c2880a",fontFamily:M}}>R${pendingExpense.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span></div>}
+            {pendingExpense>0&&<div style={{marginTop:8,padding:"8px 10px",background:T.yellowLt,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:"#8a6a00"}}>⏳ Faturas a pagar</span><span style={{fontSize:13,fontWeight:700,color:"#c2880a",fontFamily:M}}>{"R$"+pendingExpense.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span></div>}
           </div>
 
           <button onClick={()=>exportToExcel(filteredTxs,selMonth)} style={{width:"100%",marginBottom:12,padding:"11px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:13,fontWeight:700,color:T.dark,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>📥 Exportar CSV — {monthLabel}</button>
@@ -666,7 +669,7 @@ export default function App() {
               <div style={{flex:1}}>
                 {catData.slice(0,5).map(d=>(
                   <div key={d.label} style={{marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M}}>R${d.val.toFixed(0)}</span></div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M}}>{"R$"+d.val.toFixed(0)}/span></div>
                     {goals[d.label]&&<div style={{marginLeft:16}}><div style={{height:4,background:T.border,borderRadius:99}}><div style={{height:"100%",width:Math.min(100,(d.val/goals[d.label])*100)+"%",background:d.val>goals[d.label]?T.red:d.val>goals[d.label]*.8?T.yellow:T.green,borderRadius:99}}/></div><div style={{fontSize:10,color:d.val>goals[d.label]?T.red:T.sub,marginTop:2}}>{d.val>goals[d.label]?"R$"+(d.val-goals[d.label]).toFixed(0)+" acima":"R$"+(goals[d.label]-d.val).toFixed(0)+" disponível"}</div></div>}
                   </div>
                 ))}
@@ -678,7 +681,7 @@ export default function App() {
 
           {incomeData.length>0&&<div style={card}>
             <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>💰 Receitas por origem</div>
-            <div style={{display:"flex",alignItems:"center",gap:16}}><Donut segs={incomeData.map(d=>({val:d.val,color:d.color}))} size={80}/><div style={{flex:1}}>{incomeData.map(d=>(<div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>R${d.val.toFixed(0)}</span></div>))}</div></div>
+            <div style={{display:"flex",alignItems:"center",gap:16}}><Donut segs={incomeData.map(d=>({val:d.val,color:d.color}))} size={80}/><div style={{flex:1}}>{incomeData.map(d=>(<div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>{"R$"+d.val.toFixed(0)}/span></div>))}</div></div>
           </div>}
 
           {selMonth!=="all"&&<div style={card}>
@@ -692,7 +695,7 @@ export default function App() {
           <div style={card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span><button onClick={()=>setPage("extrato")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver extrato</button></div>
             {filteredTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação neste período.</div>}
-            {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{t.type==="in"?"+":"-"}R${Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
+            {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
           </div>
         </>}
       </>}
@@ -756,20 +759,20 @@ export default function App() {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
             <div>
               <div style={{fontSize:10,color:T.sub,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Receitas</div>
-              <div style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:M}}>R${shownTxs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+              <div style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:M}}>{"R$"+shownTxs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
             </div>
             <div style={{borderLeft:"1px solid "+T.border,borderRight:"1px solid "+T.border}}>
               <div style={{fontSize:10,color:T.sub,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Despesas</div>
-              <div style={{fontSize:14,fontWeight:800,color:T.red,fontFamily:M}}>R${shownTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+              <div style={{fontSize:14,fontWeight:800,color:T.red,fontFamily:M}}>{"R$"+shownTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
             </div>
             <div>
               <div style={{fontSize:10,color:T.sub,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Saldo</div>
-              {(()=>{const s=shownTxs.reduce((a,t)=>a+(t.type==="in"?Number(t.value):-Math.abs(Number(t.value))),0);return<div style={{fontSize:14,fontWeight:800,color:s>=0?T.green:T.red,fontFamily:M}}>{s>=0?"+":""}R${Math.abs(s).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>})()}
+              {(()=>{const s=shownTxs.reduce((a,t)=>a+(t.type==="in"?Number(t.value):-Math.abs(Number(t.value))),0);return<div style={{fontSize:14,fontWeight:800,color:s>=0?T.green:T.red,fontFamily:M}}>{s>=0?"+":""}{"R$"+Math.abs(s).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>})()}
             </div>
           </div>
           {shownTxs.some(t=>t.status==="pendente")&&<div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+T.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={{fontSize:11,color:"#c2880a"}}>⏳ Pendentes incluídos</span>
-            <span style={{fontSize:12,fontWeight:700,color:"#c2880a",fontFamily:M}}>R${shownTxs.filter(t=>t.status==="pendente"&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+            <span style={{fontSize:12,fontWeight:700,color:"#c2880a",fontFamily:M}}>{"R$"+shownTxs.filter(t=>t.status==="pendente"&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
           </div>}
         </div>}
 
@@ -789,7 +792,7 @@ export default function App() {
                 {t.user_email&&t.user_email!==session?.user?.email&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:T.accentLt,color:T.accent,fontWeight:700}}>👩 {t.user_email.split("@")[0]}</span>}
               </div>
             </div>
-            <span style={{fontSize:13,fontWeight:700,color:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}R${Math.abs(Number(t.value)).toFixed(2)}</span>
+            <span style={{fontSize:13,fontWeight:700,color:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span>
             <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
               <button onClick={()=>setEditTx(t)} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:14,padding:"0 2px"}}>✏️</button>
               <button onClick={()=>deleteTx(t.id)} style={{background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,padding:"0 2px"}}>🗑️</button>
@@ -886,7 +889,7 @@ export default function App() {
                 <div style={{fontSize:11,color:T.sub}}>{p.tx.date} · {p.tx.cat}{p.tx.conta?" · "+p.tx.conta:""}</div>
                 {p.isDuplicate&&p.duplicateOf&&<div style={{fontSize:11,color:"#c2880a",marginTop:2}}>Similar: {p.duplicateOf.descricao}</div>}
               </div>
-              <span style={{fontSize:13,fontWeight:700,color:p.tx.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{p.tx.type==="in"?"+":"-"}R${Math.abs(Number(p.tx.value)).toFixed(2)}</span>
+              <span style={{fontSize:13,fontWeight:700,color:p.tx.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{p.tx.type==="in"?"+":"-"}{"R$"+Math.abs(Number(p.tx.value)).toFixed(2)}</span>
             </div>))}
           </div>
           {importFuturas.length>0&&<div style={card}>
@@ -899,7 +902,7 @@ export default function App() {
             {importFuturas.map((f,i)=>(<div key={i} onClick={()=>setImportFuturas(prev=>prev.map((x,j)=>j===i?{...x,selected:!x.selected}:x))} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:i>0?"1px solid "+T.border:"none",cursor:"pointer",opacity:f.selected?1:0.4}}>
               <div style={{width:20,height:20,borderRadius:5,border:"2px solid "+(f.selected?"#7c3aed":T.border),background:f.selected?"#7c3aed":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{f.selected&&<span style={{color:"#fff",fontSize:11,fontWeight:800}}>✓</span>}</div>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.descricao}</div><div style={{fontSize:11,color:T.sub}}>{f._mesFutura} · {f.cat}</div></div>
-              <span style={{fontSize:12,fontWeight:700,color:"#7c3aed",fontFamily:M,flexShrink:0}}>-R${Math.abs(Number(f.value)).toFixed(2)}</span>
+              <span style={{fontSize:12,fontWeight:700,color:"#7c3aed",fontFamily:M,flexShrink:0}}>{"-R$"+Math.abs(Number(f.value)).toFixed(2)}</span>
             </div>))}
           </div>}
           <div style={{display:"flex",gap:10,marginBottom:20}}>
@@ -947,3 +950,5 @@ export default function App() {
     `}</style>
   </div>);
 }
++p.totalRec.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+            <td style={{padding:'5px 8px',textAlign:'right',color:p.isPast?T.red:T.yellow,fontFamily:M}}>{'R
