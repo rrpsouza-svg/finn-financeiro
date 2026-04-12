@@ -669,7 +669,7 @@ export default function App() {
               <div style={{flex:1}}>
                 {catData.slice(0,5).map(d=>(
                   <div key={d.label} style={{marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M}}>{"R$"+d.val.toFixed(0)}/span></div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M}}>{"R$"+d.val.toFixed(0)}</span></div>
                     {goals[d.label]&&<div style={{marginLeft:16}}><div style={{height:4,background:T.border,borderRadius:99}}><div style={{height:"100%",width:Math.min(100,(d.val/goals[d.label])*100)+"%",background:d.val>goals[d.label]?T.red:d.val>goals[d.label]*.8?T.yellow:T.green,borderRadius:99}}/></div><div style={{fontSize:10,color:d.val>goals[d.label]?T.red:T.sub,marginTop:2}}>{d.val>goals[d.label]?"R$"+(d.val-goals[d.label]).toFixed(0)+" acima":"R$"+(goals[d.label]-d.val).toFixed(0)+" disponível"}</div></div>}
                   </div>
                 ))}
@@ -681,7 +681,7 @@ export default function App() {
 
           {incomeData.length>0&&<div style={card}>
             <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>💰 Receitas por origem</div>
-            <div style={{display:"flex",alignItems:"center",gap:16}}><Donut segs={incomeData.map(d=>({val:d.val,color:d.color}))} size={80}/><div style={{flex:1}}>{incomeData.map(d=>(<div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>{"R$"+d.val.toFixed(0)}/span></div>))}</div></div>
+            <div style={{display:"flex",alignItems:"center",gap:16}}><Donut segs={incomeData.map(d=>({val:d.val,color:d.color}))} size={80}/><div style={{flex:1}}>{incomeData.map(d=>(<div key={d.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}><div style={{width:8,height:8,borderRadius:99,background:d.color,flexShrink:0}}/><span style={{flex:1,fontSize:12,color:T.sub}}>{d.icon} {d.label}</span><span style={{fontSize:12,fontWeight:700,fontFamily:M,color:T.green}}>{"R$"+d.val.toFixed(0)}</span></div>))}</div></div>
           </div>}
 
           {selMonth!=="all"&&<div style={card}>
