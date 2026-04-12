@@ -466,14 +466,9 @@ export default function App() {
     if(!session)return;
     setLoadingTxs(true);
     supabase.from("transactions").select("*").order("date",{ascending:false}).then(({data})=>{setTxs(data||[]);setLoadingTxs(false);});
-    // Load accounts
-    supabase.from("accounts").select("*").order("nome").then(async({data})=>{
-      if(data&&data.length>0){setAccounts(data);}
-      else {
-        // First time: seed default accounts
-        const{data:inserted}=await supabase.from("accounts").insert(DEFAULT_ACCOUNTS).select();
-        if(inserted)setAccounts(inserted);
-      }
+    // Load accounts - never auto-seed, user creates manually
+    supabase.from("accounts").select("*").order("nome").then(({data})=>{
+      setAccounts(data||[]);
     });
     // Load chat history (last 30 days)
     const since=new Date();since.setDate(since.getDate()-30);
