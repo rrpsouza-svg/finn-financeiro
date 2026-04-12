@@ -446,6 +446,10 @@ export default function App() {
   const [importLog,setImportLog]     = useState([]);
   const [importing,setImporting]     = useState(false);
   const [recatLoading,setRecatLoading] = useState(false);
+  const [importStep,setImportStep]     = useState("idle"); // idle | select_account | preview | importing
+  const [importFiles,setImportFiles]   = useState([]);
+  const [importAccount,setImportAccount] = useState("");
+  const [importPreview,setImportPreview] = useState([]); // {tx, isDuplicate, duplicateOf, selected}
   const [filterSrc,setFilterSrc]     = useState("all");
   const [filterConta,setFilterConta] = useState("all");
   const [savingTx,setSavingTx]       = useState(false);
@@ -520,28 +524,62 @@ export default function App() {
   const deleteTx=async(id)=>{await supabase.from("transactions").delete().eq("id",id);setTxs(p=>p.filter(t=>t.id!==id));};
 
   const handleFiles=useCallback(async(e)=>{
-    const files=Array.from(e.target.files||[]);setImporting(true);
-    for(const file of files){
+    const files=Array.from(e.target.files||[]);
+    if(!files.length)return;
+    setImportFiles(files);
+    setImportAccount("");
+    setImportPreview([]);
+    setImportStep("select_account");
+    e.target.value="";
+  },[]);
+
+  const processImportFiles=useCallback(async(selectedAccount)=>{
+    setImportStep("importing");setImporting(true);
+    let allParsed=[];
+    for(const file of importFiles){
       const text=await file.text();const name=file.name.toLowerCase();let parsed=[];let isModelo=false;
       if(name.endsWith(".ofx")||text.includes("<STMTTRN>")){parsed=parseOFX(text);}
       else if(name.endsWith(".csv")||name.endsWith(".txt")){
         if(text.toUpperCase().includes("DATA_PAG")||text.toUpperCase().includes("GRUPO_PARCELA")){parsed=parseModeloFinn(text);isModelo=true;}
         else{parsed=parseCSV(text);}
-      }else{setImportLog(p=>["Formato não suportado: "+file.name,...p]);continue;}
-      if(parsed.length===0){setImportLog(p=>["Nenhuma transação: "+file.name,...p]);continue;}
-      setImportLog(p=>["Processando "+parsed.length+" de "+file.name+"...",...p]);
-      const semCat=parsed.filter(t=>!t.cat||t.cat==="Outros"||t.cat==="Outras Receitas");
-      const comCat=parsed.filter(t=>t.cat&&t.cat!=="Outros"&&t.cat!=="Outras Receitas");
-      let categorized=[...comCat];
-      if(semCat.length>0&&hasAI){const aiCat=await categorizarComIA(semCat);categorized=[...categorized,...aiCat];}
-      else{categorized=[...categorized,...semCat];}
-      const toInsert=categorized.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({date,data_compra:data_compra||null,descricao,cat,value,type,src:src||"modelo",conta:conta||"",status:status||"efetivado"}));
-      let inserted=0;
-      for(let i=0;i<toInsert.length;i+=50){const{data}=await supabase.from("transactions").insert(toInsert.slice(i,i+50)).select();if(data){setTxs(p=>[...data,...p]);inserted+=data.length;}}
-      setImportLog(p=>{const n=[...p];n[0]=inserted+" transações de "+file.name+(isModelo?" (modelo)":"");return n;});
+      }else{continue;}
+      // Override conta if user selected one and file doesn't have it
+      parsed=parsed.map(t=>({...t,conta:t.conta||selectedAccount}));
+      allParsed=[...allParsed,...parsed];
     }
-    setImporting(false);e.target.value="";
-  },[hasAI]);
+    if(allParsed.length===0){setImporting(false);setImportStep("idle");return;}
+    // Categorize
+    const semCat=allParsed.filter(t=>!t.cat||t.cat==="Outros"||t.cat==="Outras Receitas");
+    const comCat=allParsed.filter(t=>t.cat&&t.cat!=="Outros"&&t.cat!=="Outras Receitas");
+    let categorized=[...comCat];
+    if(semCat.length>0&&hasAI){const aiCat=await categorizarComIA(semCat);categorized=[...categorized,...aiCat];}
+    else{categorized=[...categorized,...semCat];}
+    // Deduplicate: check against existing txs
+    const preview=categorized.map(t=>{
+      const dupThreshold=Math.abs(Number(t.value))*0.01; // 1% tolerance
+      const dup=txs.find(ex=>{
+        const sameVal=Math.abs(Math.abs(Number(ex.value))-Math.abs(Number(t.value)))<dupThreshold;
+        const sameDesc=ex.descricao?.toLowerCase().slice(0,15)===t.descricao?.toLowerCase().slice(0,15);
+        const sameDate=ex.date===t.date;
+        return sameVal&&(sameDate||sameDesc);
+      });
+      return{tx:t,isDuplicate:!!dup,duplicateOf:dup||null,selected:!dup};
+    });
+    setImportPreview(preview);
+    setImporting(false);
+    setImportStep("preview");
+  },[importFiles,txs,hasAI]);
+
+  const confirmImport=useCallback(async()=>{
+    const toImport=importPreview.filter(p=>p.selected).map(p=>p.tx);
+    if(!toImport.length){setImportStep("idle");return;}
+    setImporting(true);
+    const toInsert=toImport.map(({date,data_compra,descricao,cat,value,type,src,conta,status})=>({date,data_compra:data_compra||null,descricao,cat,value,type,src:src||"extrato",conta:conta||"",status:status||"efetivado"}));
+    let inserted=0;
+    for(let i=0;i<toInsert.length;i+=50){const{data}=await supabase.from("transactions").insert(toInsert.slice(i,i+50)).select();if(data){setTxs(p=>[...data,...p]);inserted+=data.length;}}
+    setImportLog(p=>[inserted+" transações importadas com sucesso!",...p]);
+    setImporting(false);setImportStep("idle");setImportPreview([]);
+  },[importPreview]);
 
   const recategorizarTudo=async()=>{
     if(!hasAI)return;setRecatLoading(true);
@@ -867,25 +905,97 @@ export default function App() {
         </>}
 
         {page==="import"&&<>
-          <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>Importar</div>
-          <p style={{color:T.sub,fontSize:13,margin:"0 0 14px"}}>OFX · CSV · Modelo Finn</p>
-          <div onClick={()=>!importing&&fileRef.current?.click()} style={{border:"2px dashed "+(importing?T.accent:T.border),borderRadius:16,padding:32,textAlign:"center",cursor:importing?"default":"pointer",background:T.card,marginBottom:14}}>
-            <div style={{fontSize:40,marginBottom:10}}>{importing?"🤖":"📤"}</div>
-            <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>{importing?"Processando...":"Toque para selecionar"}</div>
-            <div style={{fontSize:12,color:T.sub}}>.ofx · .csv · modelo finn</div>
-            <input ref={fileRef} type="file" accept=".ofx,.csv,.txt" multiple style={{display:"none"}} onChange={handleFiles}/>
-          </div>
-          <div style={{...card,background:hasAI?T.accentLt:"#f8f8f8",border:"1px solid "+(hasAI?T.accent+"33":T.border)}}>
-            <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:hasAI?T.accent:T.sub}}>🤖 Recategorizar todas as transações</div>
-            <div style={{fontSize:12,color:T.sub,marginBottom:12}}>A IA vai reclassificar todas as {txs.length} transações.</div>
-            <button onClick={recategorizarTudo} disabled={recatLoading||!hasAI} style={{width:"100%",padding:"12px",background:hasAI?T.accent:"#ccc",color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:14,fontWeight:700,cursor:hasAI?"pointer":"default",opacity:recatLoading?0.7:1}}>
-              {!hasAI?"Requer chave Anthropic":recatLoading?"Recategorizando...":"Recategorizar tudo com IA"}
-            </button>
-          </div>
-          {importLog.length>0&&<div style={card}>
-            <div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8}}>Log</div>
-            {importLog.map((l,i)=><div key={i} style={{fontSize:13,padding:"4px 0",color:T.green,fontFamily:M}}>{l}</div>)}
+          <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>Importar Extrato</div>
+          <p style={{color:T.sub,fontSize:13,margin:"0 0 14px"}}>OFX · CSV · Modelo Finn · deduplicação automática</p>
+
+          {/* STEP 1: Select file */}
+          {importStep==="idle"&&<>
+            <div onClick={()=>!importing&&fileRef.current?.click()} style={{border:"2px dashed "+T.border,borderRadius:16,padding:32,textAlign:"center",cursor:"pointer",background:T.card,marginBottom:14}}>
+              <div style={{fontSize:40,marginBottom:10}}>📤</div>
+              <div style={{fontSize:15,fontWeight:700,marginBottom:4}}>Toque para selecionar</div>
+              <div style={{fontSize:12,color:T.sub}}>.ofx · .csv · modelo finn</div>
+              <input ref={fileRef} type="file" accept=".ofx,.csv,.txt" multiple style={{display:"none"}} onChange={handleFiles}/>
+            </div>
+            <div style={{...card,background:hasAI?T.accentLt:"#f8f8f8",border:"1px solid "+(hasAI?T.accent+"33":T.border)}}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:hasAI?T.accent:T.sub}}>🤖 Recategorizar todas as transações</div>
+              <div style={{fontSize:12,color:T.sub,marginBottom:12}}>A IA reclassifica todas as {txs.length} transações existentes.</div>
+              <button onClick={recategorizarTudo} disabled={recatLoading||!hasAI} style={{width:"100%",padding:"12px",background:hasAI?T.accent:"#ccc",color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:14,fontWeight:700,cursor:hasAI?"pointer":"default",opacity:recatLoading?0.7:1}}>
+                {!hasAI?"Requer chave Anthropic":recatLoading?"Recategorizando...":"Recategorizar tudo com IA"}
+              </button>
+            </div>
+            {importLog.length>0&&<div style={card}>
+              <div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8}}>Log</div>
+              {importLog.map((l,i)=><div key={i} style={{fontSize:13,padding:"4px 0",color:T.green,fontFamily:M}}>{l}</div>)}
+            </div>}
+          </>}
+
+          {/* STEP 2: Select account */}
+          {importStep==="select_account"&&<div style={card}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>Qual conta é esse extrato?</div>
+            <div style={{fontSize:13,color:T.sub,marginBottom:20}}>{importFiles.map(f=>f.name).join(", ")}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+              {accounts.filter(a=>a.ativo).map(a=>(
+                <button key={a.id} onClick={()=>setImportAccount(a.nome)} style={{padding:"12px 16px",borderRadius:12,border:"2px solid "+(importAccount===a.nome?T.accent:T.border),background:importAccount===a.nome?T.accentLt:T.surface,color:importAccount===a.nome?T.accent:T.dark,fontFamily:F,fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>{a.nome}</span>
+                  <span style={{fontSize:11,color:importAccount===a.nome?T.accent:T.sub}}>{a.banco}</span>
+                </button>
+              ))}
+              <button onClick={()=>setImportAccount("")} style={{padding:"12px 16px",borderRadius:12,border:"2px solid "+(importAccount===""&&importAccount!==undefined?T.accent:T.border),background:T.surface,color:T.sub,fontFamily:F,fontSize:14,cursor:"pointer",textAlign:"left"}}>
+                Não vincular a nenhuma conta
+              </button>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setImportStep("idle")} style={{flex:1,padding:"13px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",color:T.sub}}>Cancelar</button>
+              <button onClick={()=>processImportFiles(importAccount)} style={{flex:2,padding:"13px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer"}}>Processar →</button>
+            </div>
           </div>}
+
+          {/* STEP 3: Processing */}
+          {importStep==="importing"&&<div style={{...card,textAlign:"center",padding:40}}>
+            <div style={{fontSize:40,marginBottom:12}}>🤖</div>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Processando e verificando duplicatas...</div>
+            <div style={{fontSize:13,color:T.sub}}>A IA está categorizando e comparando com seus lançamentos existentes</div>
+          </div>}
+
+          {/* STEP 4: Preview with dedup */}
+          {importStep==="preview"&&<>
+            <div style={{...card,padding:14}}>
+              <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>{importPreview.length} transações encontradas</div>
+              <div style={{fontSize:13,color:T.sub,marginBottom:12}}>
+                <span style={{color:T.green,fontWeight:700}}>{importPreview.filter(p=>p.selected).length} selecionadas</span>
+                {importPreview.filter(p=>p.isDuplicate).length>0&&<span> · <span style={{color:T.yellow,fontWeight:700}}>{importPreview.filter(p=>p.isDuplicate).length} possíveis duplicatas</span></span>}
+              </div>
+              <div style={{display:"flex",gap:8,marginBottom:12}}>
+                <button onClick={()=>setImportPreview(p=>p.map(x=>({...x,selected:true})))} style={{flex:1,padding:"8px",background:T.greenLt,border:"1px solid "+T.green+"44",borderRadius:8,color:T.green,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Selecionar todas</button>
+                <button onClick={()=>setImportPreview(p=>p.map(x=>({...x,selected:false})))} style={{flex:1,padding:"8px",background:T.redLt,border:"1px solid "+T.red+"44",borderRadius:8,color:T.red,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Desmarcar todas</button>
+              </div>
+            </div>
+            <div style={card}>
+              {importPreview.map((p,i)=>(
+                <div key={i} onClick={()=>setImportPreview(prev=>prev.map((x,j)=>j===i?{...x,selected:!x.selected}:x))}
+                  style={{display:"flex",alignItems:"flex-start",gap:10,padding:"11px 0",borderTop:i>0?"1px solid "+T.border:"none",cursor:"pointer",opacity:p.selected?1:0.45}}>
+                  <div style={{width:22,height:22,borderRadius:6,border:"2px solid "+(p.selected?T.accent:T.border),background:p.selected?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:2}}>
+                    {p.selected&&<span style={{color:"#fff",fontSize:12,fontWeight:800}}>✓</span>}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                      <span style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.tx.descricao}</span>
+                      {p.isDuplicate&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:99,background:T.yellowLt,color:"#c2880a",fontWeight:700,flexShrink:0}}>⚠️ duplicata</span>}
+                    </div>
+                    <div style={{fontSize:11,color:T.sub}}>{p.tx.date} · {p.tx.cat}{p.tx.conta?" · "+p.tx.conta:""}</div>
+                    {p.isDuplicate&&p.duplicateOf&&<div style={{fontSize:11,color:"#c2880a",marginTop:2}}>Similar a: {p.duplicateOf.descricao} ({p.duplicateOf.date})</div>}
+                  </div>
+                  <span style={{fontSize:13,fontWeight:700,color:p.tx.type==="in"?T.green:T.red,fontFamily:M,flexShrink:0}}>{p.tx.type==="in"?"+":"-"}R${Math.abs(Number(p.tx.value)).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10,marginBottom:20}}>
+              <button onClick={()=>{setImportStep("idle");setImportPreview([]);}} style={{flex:1,padding:"13px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:14,fontWeight:700,cursor:"pointer",color:T.sub}}>Cancelar</button>
+              <button onClick={confirmImport} disabled={importing||importPreview.filter(p=>p.selected).length===0} style={{flex:2,padding:"13px",background:T.green,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer",opacity:importing?0.7:1}}>
+                {importing?"Importando...":"Importar "+importPreview.filter(p=>p.selected).length+" transações"}
+              </button>
+            </div>
+          </>}
         </>}
 
         {page==="chat"&&<>
