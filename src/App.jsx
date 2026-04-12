@@ -267,6 +267,7 @@ export default function App() {
   const [chatIn,setChatIn]         = useState("");
   const [chatBusy,setChatBusy]     = useState(false);
   const [isListening,setIsListening] = useState(false);
+  const [historyLoaded,setHistoryLoaded] = useState(false);
   const [form,setForm]             = useState({descricao:"",value:"",cat:"Alimentação",type:"out",date:new Date().toISOString().slice(0,10)});
   const [importLog,setImportLog]   = useState([]);
   const [importing,setImporting]   = useState(false);
@@ -290,6 +291,18 @@ export default function App() {
     if(!session)return;
     setLoadingTxs(true);
     supabase.from("transactions").select("*").order("date",{ascending:false}).then(({data})=>{setTxs(data||[]);setLoadingTxs(false);});
+    // Load chat history (last 30 days)
+    const since = new Date(); since.setDate(since.getDate()-30);
+    supabase.from("chat_history").select("*")
+      .eq("user_id",session.user.id)
+      .gte("created_at",since.toISOString())
+      .order("created_at",{ascending:true})
+      .then(({data})=>{
+        if(data&&data.length>0){
+          setChatLog(data.map(m=>({role:m.role,content:m.content})));
+        }
+        setHistoryLoaded(true);
+      });
   },[session]);
 
   useEffect(()=>{
@@ -382,7 +395,7 @@ export default function App() {
       const history=[...chatLog,{role:"user",content:transcript}];
       setChatLog(history);setChatBusy(true);
       const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)).join("\n");
-      const system="Você é a Finn, assistente financeira. Responda em português, seja concisa.\nDados: Receitas R$"+income.toFixed(2)+" Despesas R$"+expense.toFixed(2)+" Saldo R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
+      const system="Você é a Finn, assistente financeira. Hoje é "+new Date().toLocaleDateString("pt-BR")+". Responda em português, seja concisa.\nDados: Receitas R$"+income.toFixed(2)+" Despesas R$"+expense.toFixed(2)+" Saldo R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
       aiCall(history.map(m=>({role:m.role,content:m.content})),system).then(async reply=>{
         let r=reply||"IA não disponível.";
         const jm=r.match(/<<<({.*?})>>>/s);
@@ -398,13 +411,16 @@ export default function App() {
     const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+(t.type==="in"?"entrada":"saída")+")").join("\n");
     const history=[...chatLog,{role:"user",content:msg}];
     setChatLog(history);setChatIn("");setChatBusy(true);
-    const system="Você é a Finn, assistente financeira de um casal. Seja concisa e amigável, responda em português.\nPeríodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar transação, inclua no final: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
+    // Save user message
+    supabase.from("chat_history").insert([{user_id:session.user.id,role:"user",content:msg}]).then(()=>{});
+    const system="Você é a Finn, assistente financeira de um casal. Hoje é "+new Date().toLocaleDateString("pt-BR")+". Seja concisa e amigável, responda em português. Sempre use a data de hoje nos registros.\nPeríodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+"\nTransações:\n"+summary+"\nPara registrar transação, inclua no final: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\"}>>>";
     try{
       const reply=await aiCall(history.map(m=>({role:m.role,content:m.content})),system)||"A Finn IA não está ativa. Adicione REACT_APP_ANTHROPIC_KEY no Vercel.";
       let r=reply;
       const jm=r.match(/<<<({.*?})>>>/s);
       if(jm){try{const o=JSON.parse(jm[1]);const v=parseFloat(o.value)||0;await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transação",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual"});r=r.replace(/<<<{.*?}>>>/s,"").trim();}catch{}}
       setChatLog(p=>[...p,{role:"assistant",content:r}]);
+      supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});
     }catch{setChatLog(p=>[...p,{role:"assistant",content:"Erro de conexão."}]);}
     setChatBusy(false);
   };
