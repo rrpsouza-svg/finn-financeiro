@@ -90,6 +90,52 @@ function parseCSV(text) {
   }).filter(Boolean);
 }
 
+function parseC6(text) {
+  // C6 Bank: semicolon separator, Data de Compra;Nome no Cartão;Final do Cartão;Categoria;Descrição;Parcela;Valor (em US$);Cotação (em R$);Valor (em R$)
+  const lines = text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
+  if (lines.length < 2) return [];
+  const parseDate = s => {
+    if (!s) return new Date().toISOString().slice(0,10);
+    const parts = s.trim().split("/");
+    if (parts.length===3) return parts[2]+"-"+parts[1].padStart(2,"0")+"-"+parts[0].padStart(2,"0");
+    return new Date().toISOString().slice(0,10);
+  };
+  const C6_CATS = {
+    "Alimentação":"Alimentação","Restaurante":"Alimentação","Supermercado":"Alimentação","Padaria":"Alimentação",
+    "Saúde":"Saúde","Farmácia":"Saúde","Médic":"Saúde","Assistência médica":"Saúde",
+    "Transporte":"Transporte","Combustível":"Transporte","Pedágio":"Transporte",
+    "Educação":"Educação","Escola":"Educação",
+    "Lazer":"Lazer","Entretenimento":"Lazer","Cinema":"Lazer",
+    "Vestuário":"Roupas","Roupa":"Roupas",
+    "Serviços":"Assinaturas","Assinatura":"Assinaturas","Streaming":"Assinaturas",
+  };
+  const mapCat = (c6cat, desc) => {
+    const combined = (c6cat||"")+" "+(desc||"");
+    for(const [k,v] of Object.entries(C6_CATS)){if(combined.toLowerCase().includes(k.toLowerCase()))return v;}
+    return "Outros";
+  };
+  return lines.slice(1).map(line=>{
+    const c = line.split(";").map(s=>s.replace(/"/g,"").trim());
+    if (c.length < 9) return null;
+    const valor = parseFloat((c[8]||"0").replace(",","."));
+    if (isNaN(valor)||valor<=0) return null;
+    const parcela = c[5]||"";
+    const desc = c[4]||(c[3]||"Transação");
+    const fullDesc = parcela&&parcela!=="Única"?desc+" - Parcela "+parcela:desc;
+    return {
+      date: parseDate(c[0]),
+      data_compra: parseDate(c[0]),
+      descricao: fullDesc,
+      cat: mapCat(c[3], c[4]),
+      value: -valor,
+      type: "out",
+      src: "CSV",
+      conta: "",
+      status: "pendente",
+    };
+  }).filter(Boolean);
+}
+
 function parseModeloFinn(text) {
   const lines = text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
   if (lines.length<2) return [];
@@ -647,6 +693,7 @@ export default function App() {
       if(name.endsWith(".ofx")||text.includes("<STMTTRN>")){parsed=parseOFX(text);}
       else if(name.endsWith(".csv")||name.endsWith(".txt")){
         if(text.toUpperCase().includes("DATA_PAG")||text.toUpperCase().includes("GRUPO_PARCELA")){parsed=parseModeloFinn(text);isModelo=true;}
+        else if(text.includes("Data de Compra;Nome no Cartão")||text.includes("Data de Compra;Nome no Cart")){parsed=parseC6(text);}
         else{parsed=parseCSV(text);}
       }else{continue;}
       // Override conta if user selected one and file doesn't have it
