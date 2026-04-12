@@ -162,6 +162,133 @@ function gerarParcelasFuturas(parsed,existingTxs,faturaMes) {
   return futuras;
 }
 
+// ── Budget CSV parser ──
+function parseBudgetCSV(text) {
+  const lines = text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
+  if (lines.length < 2) return [];
+  const hdrs = lines[0].split(";").map(h=>h.replace(/"/g,"").trim().toUpperCase());
+  const idx = k => hdrs.findIndex(h=>h.includes(k));
+  const iMes   = idx("MES")>=0?idx("MES"):0;
+  const iTipo  = idx("TIPO")>=0?idx("TIPO"):1;
+  const iCat   = idx("CATEG")>=0?idx("CATEG"):2;
+  const iDesc  = idx("DESC")>=0?idx("DESC"):3;
+  const iValor = idx("VALOR")>=0?idx("VALOR"):4;
+  return lines.slice(1).map(line=>{
+    const c = line.split(";").map(s=>s.replace(/"/g,"").trim());
+    if (!c[iMes]||!c[iValor]) return null;
+    const valor = parseFloat((c[iValor]||"0").replace(/\./g,"").replace(",","."));
+    if (isNaN(valor)||valor<=0) return null;
+    // Parse mes: YYYY-MM or MM/YYYY or Janeiro 2026
+    let mes = c[iMes].trim();
+    if (/^\d{4}-\d{2}$/.test(mes)) {} // already good
+    else if (/^\d{2}\/\d{4}$/.test(mes)) mes = mes.slice(3)+"-"+mes.slice(0,2);
+    else {
+      const mnames=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+      const parts = mes.toLowerCase().split(/[\s/]+/);
+      const mi = mnames.findIndex(m=>parts[0].startsWith(m.slice(0,3)));
+      const yr = parts.find(p=>/^\d{4}$/.test(p));
+      if (mi>=0&&yr) mes = yr+"-"+String(mi+1).padStart(2,"0");
+    }
+    return {mes, tipo:c[iTipo]||"Despesa", categoria:c[iCat]||"Outros", descricao:c[iDesc]||"", valor};
+  }).filter(Boolean);
+}
+
+// ── Cash flow projection ──
+function buildProjection(txs, budget) {
+  const now = new Date();
+  const currentMes = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
+  // Find last pending installment date
+  const futureTxs = txs.filter(t=>t.date>currentMes||t.fatura_mes>currentMes);
+  const lastDate = futureTxs.reduce((max,t)=>{
+    const d = t.fatura_mes||t.date?.slice(0,7)||"";
+    return d>max?d:max;
+  }, currentMes);
+  // Add 1 extra month buffer
+  const [ly,lm] = lastDate.split("-").map(Number);
+  const endDate = new Date(ly, lm, 1);
+  const endMes = endDate.getFullYear()+"-"+String(endDate.getMonth()+1).padStart(2,"0");
+  // Build month range from current to end
+  const months = [];
+  let cur = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+  while (cur<=end) {
+    months.push(cur.getFullYear()+"-"+String(cur.getMonth()+1).padStart(2,"0"));
+    cur.setMonth(cur.getMonth()+1);
+  }
+  return months.map(mes=>{
+    // Real transactions for this month
+    const mtxs = txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes);
+    const realRec  = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
+    const realDesp = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
+    const pendDesp = mtxs.filter(t=>t.type==="out"&&t.status==="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+    const efectDesp= mtxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+    // Budget for this month
+    const bMes = budget.filter(b=>b.mes===mes);
+    const budgRec  = bMes.filter(b=>b.tipo?.toLowerCase().includes("receit")).reduce((a,b)=>a+Number(b.valor),0);
+    const budgDesp = bMes.filter(b=>b.tipo?.toLowerCase().includes("desp")).reduce((a,b)=>a+Number(b.valor),0);
+    const [y,m] = mes.split("-").map(Number);
+    const isPast = mes < currentMes;
+    const isCurrent = mes === currentMes;
+    return {mes, label:MONTHS_PT[m-1].slice(0,3)+" "+String(y).slice(2), isPast, isCurrent,
+      realRec, efectDesp, pendDesp, budgRec, budgDesp,
+      totalRec: isPast?realRec:budgRec||realRec,
+      totalDesp: isPast?(efectDesp+pendDesp):(pendDesp+budgDesp||efectDesp+pendDesp),
+    };
+  });
+}
+
+function ProjectionChart({txs,budget}) {
+  const proj = buildProjection(txs,budget);
+  if (!proj.length) return <div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Sem dados para projeção.</div>;
+  const maxVal = Math.max(...proj.flatMap(p=>[p.totalRec,p.totalDesp]),1);
+  const barW=16,gap=4,groupW=barW*2+gap+6;
+  const chartH=120,totalW=proj.length*groupW;
+  // Running balance
+  let runBal=0;
+  const balances=proj.map(p=>{runBal+=(p.totalRec-p.totalDesp);return runBal;});
+  const minBal=Math.min(...balances,0),maxBal=Math.max(...balances,1);
+  const balRange=maxBal-minBal||1;
+  return(<div style={{overflowX:"auto",paddingBottom:4}}>
+    <svg width={Math.max(totalW,300)} height={chartH+50} style={{display:"block"}}>
+      {[0,.5,1].map((f,i)=><line key={i} x1={0} y1={f*chartH} x2={Math.max(totalW,300)} y2={f*chartH} stroke={T.border} strokeWidth={0.5}/>)}
+      {proj.map((p,i)=>{
+        const x=i*groupW+2;
+        const rH=maxVal>0?(p.totalRec/maxVal)*(chartH-4):0;
+        const dH=maxVal>0?(p.totalDesp/maxVal)*(chartH-4):0;
+        const balY=chartH-((balances[i]-minBal)/balRange)*(chartH-20)-10;
+        return(<g key={p.mes}>
+          {p.isCurrent&&<rect x={x-1} y={0} width={groupW} height={chartH} fill={T.accent} opacity={0.06}/>}
+          <rect x={x} y={chartH-rH} width={barW} height={rH} fill={T.green} opacity={p.isPast?0.9:0.45} rx={2}/>
+          <rect x={x+barW+gap} y={chartH-dH} width={barW} height={dH} fill={p.isPast?T.red:T.yellow} opacity={p.isPast?0.9:0.5} rx={2}/>
+          <text x={x+barW} y={chartH+11} textAnchor="middle" fontSize={8} fill={p.isCurrent?T.accent:T.sub} fontFamily={F} fontWeight={p.isCurrent?700:400}>{p.label}</text>
+          <circle cx={x+barW} cy={balY} r={3} fill={balances[i]>=0?T.accent:T.red} opacity={0.8}/>
+        </g>);
+      })}
+      <polyline points={proj.map((p,i)=>{const x=i*groupW+2+barW;const y=chartH-((balances[i]-minBal)/balRange)*(chartH-20)-10;return x+","+y;}).join(" ")} fill="none" stroke={T.accent} strokeWidth={1.5} opacity={0.7}/>
+    </svg>
+    <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:6,flexWrap:"wrap"}}>
+      {[{color:T.green,label:"Receita"},{color:T.red,label:"Despesa real"},{color:T.yellow,label:"Projeção"},{color:T.accent,label:"Saldo acumulado"}].map(l=>(
+        <div key={l.label} style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:10,height:10,borderRadius:2,background:l.color}}/><span style={{fontSize:10,color:T.sub,fontFamily:F}}>{l.label}</span></div>
+      ))}
+    </div>
+    {/* Table summary */}
+    <div style={{marginTop:12,overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:F}}>
+        <thead><tr style={{background:T.bg}}>
+          {["Mês","Receita","Despesa","Saldo Mês","Acumulado"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"right",color:T.sub,fontWeight:700,letterSpacing:.3,whiteSpace:"nowrap"}}>{h}</th>)}
+        </tr></thead>
+        <tbody>{proj.map((p,i)=>{const sal=p.totalRec-p.totalDesp;return(<tr key={p.mes} style={{background:p.isCurrent?T.accentLt:i%2===0?T.bg:"#fff",fontWeight:p.isCurrent?700:400}}>
+          <td style={{padding:"5px 8px",color:p.isPast?T.dark:T.sub,whiteSpace:"nowrap"}}>{p.label}{!p.isPast&&!p.isCurrent?<span style={{fontSize:9,color:T.yellow,marginLeft:4}}>proj</span>:null}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:T.green,fontFamily:M}}>R${p.totalRec.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:p.isPast?T.red:T.yellow,fontFamily:M}}>R${p.totalDesp.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:sal>=0?T.green:T.red,fontFamily:M}}>{sal>=0?"+":""}R${Math.abs(sal).toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+          <td style={{padding:"5px 8px",textAlign:"right",color:balances[i]>=0?T.accent:T.red,fontFamily:M,fontWeight:700}}>R${balances[i].toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+        </tr>);})</tbody>
+      </table>
+    </div>
+  </div>);
+}
+
 function exportToExcel(txs,selMonth) {
   const header=["DATA_PAGAMENTO","DATA_COMPRA","DESCRICAO","VALOR","TIPO","CONTA","CATEGORIA","STATUS","PARCELA","TOTAL_PARCELAS","FONTE","USUARIO"];
   const rows=txs.map(t=>[t.date||"",t.data_compra||t.date||"",t.descricao||"",Math.abs(Number(t.value)).toFixed(2).replace(".",","),t.type==="in"?"Receita":"Despesa",t.conta||"",t.cat||"",t.status||"efetivado",t.parcela_atual||"",t.total_parcelas||"",t.src||"manual",t.user_email||""]);
@@ -327,7 +454,8 @@ export default function App() {
   const [filterDataCompra,setFilterDataCompra]=useState("all");
   const [savingTx,setSavingTx]=useState(false);const [resumo,setResumo]=useState(null);const [resumoLoading,setResumoLoading]=useState(false);
   const [importLog,setImportLog]=useState([]);const [showCashFlow,setShowCashFlow]=useState(false);
-  const chatEnd=useRef(null);const fileRef=useRef(null);const recognitionRef=useRef(null);
+  const [budget,setBudget]=useState([]);const [showProjection,setShowProjection]=useState(false);
+  const chatEnd=useRef(null);const fileRef=useRef(null);const recognitionRef=useRef(null);const budgetFileRef=useRef(null);
   const hasAI=!!process.env.REACT_APP_ANTHROPIC_KEY;
 
   useEffect(()=>{
@@ -340,6 +468,7 @@ export default function App() {
     if(!session)return;setLoadingTxs(true);
     supabase.from("transactions").select("*").order("date",{ascending:false}).then(({data})=>{setTxs(data||[]);setLoadingTxs(false);});
     supabase.from("accounts").select("*").order("nome").then(({data})=>setAccounts(data||[]));
+    supabase.from("budget").select("*").order("mes").then(({data})=>setBudget(data||[]));
     const since=new Date();since.setDate(since.getDate()-30);
     supabase.from("chat_history").select("*").eq("user_id",session.user.id).gte("created_at",since.toISOString()).order("created_at",{ascending:true}).then(({data})=>{if(data&&data.length>0)setChatLog(data.map(m=>({role:m.role,content:m.content})));});
   },[session]);
@@ -402,6 +531,18 @@ export default function App() {
   const deleteTx=async(id)=>{await supabase.from("transactions").delete().eq("id",id);setTxs(p=>p.filter(t=>t.id!==id));};
 
   const handleFiles=useCallback(async(e)=>{const files=Array.from(e.target.files||[]);if(!files.length)return;setImportFiles(files);setImportAccount("");setImportFaturaMes("");setImportPreview([]);setImportFuturas([]);setImportStep("select_account");e.target.value="";},[]);
+
+  const handleBudgetImport=useCallback(async(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const text=await file.text();
+    const parsed=parseBudgetCSV(text);
+    if(!parsed.length){alert("Nenhum dado encontrado no arquivo.");return;}
+    // Replace all budget data
+    await supabase.from("budget").delete().neq("id","00000000-0000-0000-0000-000000000000");
+    const{data}=await supabase.from("budget").insert(parsed).select();
+    if(data){setBudget(data);setImportLog(p=>[data.length+" linhas de orçamento importadas (substituindo anterior)",...p]);}
+    e.target.value="";
+  },[]);
 
   const processImportFiles=useCallback(async(selectedAccount,faturaMes)=>{
     setImportStep("importing");setImporting(true);let allParsed=[];
@@ -509,13 +650,16 @@ export default function App() {
 
           <button onClick={()=>exportToExcel(filteredTxs,selMonth)} style={{width:"100%",marginBottom:12,padding:"11px",background:T.surface,border:"1.5px solid "+T.border,borderRadius:12,fontFamily:F,fontSize:13,fontWeight:700,color:T.dark,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>📥 Exportar CSV — {monthLabel}</button>
 
-          {/* Cash flow chart */}
+          {/* Projection chart */}
           <div style={card}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showCashFlow?12:0}}>
-              <span style={{fontWeight:700,fontSize:14}}>📈 Fluxo de Caixa</span>
-              <button onClick={()=>setShowCashFlow(!showCashFlow)} style={{background:T.accentLt,border:"none",borderRadius:8,padding:"5px 10px",color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F}}>{showCashFlow?"Ocultar":"Ver gráfico"}</button>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showProjection?12:0}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:14}}>📈 Projeção de Fluxo de Caixa</div>
+                {showProjection&&<div style={{fontSize:11,color:T.sub,marginTop:2}}>Até a última parcela projetada · barras claras = estimativa</div>}
+              </div>
+              <button onClick={()=>setShowProjection(!showProjection)} style={{background:T.accentLt,border:"none",borderRadius:8,padding:"5px 10px",color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F,flexShrink:0}}>{showProjection?"Ocultar":"Ver projeção"}</button>
             </div>
-            {showCashFlow&&<CashFlowChart txs={txs}/>}
+            {showProjection&&<ProjectionChart txs={txs} budget={budget}/>}
           </div>
 
           {catData.length>0&&<div style={card}>
@@ -611,6 +755,28 @@ export default function App() {
             <button onClick={()=>{setFilterTipo("all");setFilterConta("all");setFilterSrc("all");setFilterUser("all");setFilterCat("all");setFilterMesVenc("all");setFilterDataCompra("all");}} style={{marginTop:10,width:"100%",padding:"8px",background:T.redLt,border:"none",borderRadius:8,color:T.red,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Limpar filtros</button>}
         </div>
 
+        {/* Totalizador */}
+        {shownTxs.length>0&&<div style={{...card,padding:12,marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
+            <div>
+              <div style={{fontSize:10,color:T.sub,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Receitas</div>
+              <div style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:M}}>R${shownTxs.filter(t=>t.type==="in").reduce((a,t)=>a+Number(t.value),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+            </div>
+            <div style={{borderLeft:"1px solid "+T.border,borderRight:"1px solid "+T.border}}>
+              <div style={{fontSize:10,color:T.sub,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Despesas</div>
+              <div style={{fontSize:14,fontWeight:800,color:T.red,fontFamily:M}}>R${shownTxs.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:T.sub,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Saldo</div>
+              {(()=>{const s=shownTxs.reduce((a,t)=>a+(t.type==="in"?Number(t.value):-Math.abs(Number(t.value))),0);return<div style={{fontSize:14,fontWeight:800,color:s>=0?T.green:T.red,fontFamily:M}}>{s>=0?"+":""}R${Math.abs(s).toLocaleString("pt-BR",{minimumFractionDigits:2})}</div>})()}
+            </div>
+          </div>
+          {shownTxs.some(t=>t.status==="pendente")&&<div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+T.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:11,color:"#c2880a"}}>⏳ Pendentes incluídos</span>
+            <span style={{fontSize:12,fontWeight:700,color:"#c2880a",fontFamily:M}}>R${shownTxs.filter(t=>t.status==="pendente"&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0).toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+          </div>}
+        </div>}
+
         <div style={card}>
           {shownTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação encontrada.</div>}
           {shownTxs.map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderTop:i>0?"1px solid "+T.border:"none",opacity:t.status==="pendente"?0.8:1}}>
@@ -665,6 +831,17 @@ export default function App() {
             <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:hasAI?T.accent:T.sub}}>🤖 Recategorizar todas as transações</div>
             <div style={{fontSize:12,color:T.sub,marginBottom:12}}>A IA reclassifica todas as {txs.length} transações existentes.</div>
             <button onClick={recategorizarTudo} disabled={recatLoading||!hasAI} style={{width:"100%",padding:"12px",background:hasAI?T.accent:"#ccc",color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:14,fontWeight:700,cursor:hasAI?"pointer":"default",opacity:recatLoading?0.7:1}}>{!hasAI?"Requer chave Anthropic":recatLoading?"Recategorizando...":"Recategorizar tudo com IA"}</button>
+          </div>
+          {/* Budget import */}
+          <div style={{...card,border:"1px solid #7c3aed33",background:"#f8f4ff"}}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:4,color:"#7c3aed"}}>🔮 Importar Orçamento</div>
+            <div style={{fontSize:12,color:T.sub,marginBottom:12}}>Sobe o modelo de orçamento para projeção de fluxo de caixa. A importação substitui o orçamento anterior.</div>
+            <div onClick={()=>budgetFileRef.current?.click()} style={{border:"1.5px dashed #7c3aed88",borderRadius:10,padding:"14px",textAlign:"center",cursor:"pointer",background:"#fff",marginBottom:8}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#7c3aed",marginBottom:2}}>📂 Selecionar arquivo de orçamento</div>
+              <div style={{fontSize:11,color:T.sub}}>.csv separado por ponto e vírgula</div>
+              <input ref={budgetFileRef} type="file" accept=".csv,.txt" style={{display:"none"}} onChange={handleBudgetImport}/>
+            </div>
+            {budget.length>0&&<div style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>✅ {budget.length} linhas de orçamento carregadas</div>}
           </div>
           {importLog.length>0&&<div style={card}><div style={{fontSize:12,fontWeight:700,color:T.sub,marginBottom:8}}>Log</div>{importLog.map((l,i)=><div key={i} style={{fontSize:13,padding:"4px 0",color:T.green,fontFamily:M}}>{l}</div>)}</div>}
         </>}
