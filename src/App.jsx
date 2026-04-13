@@ -86,8 +86,8 @@ function parseOFX(text) {
       const isPagamento=desc.toLowerCase().includes("pagamento recebido")||desc.toLowerCase().includes("pagamento de fatura")||desc.toLowerCase().includes("payment");
       if(isPagamento)return null;
       if(amt>0){
-        // Estorno — abate da fatura, entra como despesa negativa (pendente) para reduzir o total
-        return{date,descricao:desc,cat:"Estorno/Crédito",value:amt,type:"out",src:"OFX",conta:"",status:"pendente"};
+        // Estorno — receita pendente no cartão, efetivada junto com o pagamento da fatura
+        return{date,descricao:desc,cat:"Estorno/Crédito",value:amt,type:"in",src:"OFX",conta:"",status:"pendente"};
       }
       // Compra normal — despesa pendente
       const inst=parseInstallment(desc);
@@ -608,8 +608,12 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
   const TIPO_ICONS={CC:"🏦",credito:"💳",investimento:"📈"};
   const MONTHS_PT2=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
   const faturasPendentes=accounts.filter(a=>a.tipo==="credito"&&a.ativo).flatMap(acc=>{
-    const pend=txs.filter(t=>t.conta===acc.nome&&t.status==="pendente"&&t.type==="out");
-    const g={};pend.forEach(t=>{const m=t.fatura_mes||t.date?.slice(0,7)||"";if(!g[m])g[m]={mes:m,total:0,ids:[]};const v=t.cat==="Estorno/Crédito"?-Math.abs(Number(t.value)):Math.abs(Number(t.value));g[m].total+=v;g[m].ids.push(t.id);});
+    const pend=txs.filter(t=>t.conta===acc.nome&&t.status==="pendente");
+    // Include pending estornos (type=in) to subtract from fatura total
+    const allPend=txs.filter(t=>t.conta===acc.nome&&t.status==="pendente");
+    const g={};allPend.forEach(t=>{const m=t.fatura_mes||t.date?.slice(0,7)||"";if(!g[m])g[m]={mes:m,total:0,ids:[]};
+      const v=t.type==="in"?-Math.abs(Number(t.value)):Math.abs(Number(t.value));
+      g[m].total+=v;g[m].ids.push(t.id);});
     return Object.values(g).map(x=>({...x,conta:acc}));
   });
   const saveAccount=async(acc)=>{setSaving(true);if(acc.id){const{data}=await supabase.from("accounts").update({nome:acc.nome,saldo_inicial:acc.saldo_inicial,limite:acc.limite,dia_vencimento:acc.dia_vencimento,dia_fechamento:acc.dia_fechamento,ativo:acc.ativo}).eq("id",acc.id).select().single();if(data)setAccounts(p=>p.map(a=>a.id===acc.id?data:a));}else{const{data}=await supabase.from("accounts").insert([acc]).select().single();if(data)setAccounts(p=>[...p,data]);}setEditAcc(null);setSaving(false);};
@@ -687,8 +691,9 @@ export default function App() {
   // Include ALL expenses (pending too) for categories
   const income=filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Number(t.value),0);
   const expense=filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-  const pendingExpense=filteredTxs.filter(t=>t.type==="out"&&t.status==="pendente"&&t.cat!=="Transferência").reduce((a,t)=>{
-    const v=t.cat==="Estorno/Crédito"?-Math.abs(Number(t.value)):Math.abs(Number(t.value));return a+v;},0);
+  // Pending expenses minus pending estornos (credits)
+  const pendingExpense=filteredTxs.filter(t=>t.status==="pendente"&&t.cat!=="Transferência").reduce((a,t)=>{
+    const v=t.type==="out"?Math.abs(Number(t.value)):-Math.abs(Number(t.value));return a+v;},0);
   const balance=income-expense;
   const savPct=income>0?(balance/income*100):0;
   const prevMonthKey=()=>{const[y,m]=selMonth.split("-").map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
