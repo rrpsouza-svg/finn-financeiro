@@ -707,7 +707,7 @@ export default function App() {
   const expenseDiff=prevExpense>0?((expense-prevExpense)/prevExpense*100):null;
 
   // Categories: include pending too (already spent)
-  const catData=EXPENSE_CATS.map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0)})).filter(d=>d.val>0).sort((a,b)=>b.val-a.val);
+  const catData=EXPENSE_CATS.filter(c=>c!=="Transferência"&&c!=="Pgto Cartão"&&c!=="Estorno/Crédito").map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0)})).filter(d=>d.val>0).sort((a,b)=>b.val-a.val);
   const incomeData=INCOME_CATS.map(c=>({label:c,...CATS[c],val:filteredTxs.filter(t=>t.cat===c&&t.type==="in").reduce((a,t)=>a+Number(t.value),0)})).filter(d=>d.val>0);
   const availableMonths=[...new Set(txs.map(t=>t.date?.slice(0,7)).filter(Boolean))].sort().reverse();
   const[selY,selM]=selMonth.split("-").map(Number);
