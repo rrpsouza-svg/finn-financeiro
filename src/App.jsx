@@ -150,42 +150,39 @@ function parseC6(text) {
 
 function parseMercadoPago(text) {
   const lines = text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
-  // Find the transaction data header line
+  // Find the real transaction header (RELEASE_DATE line)
   const headerIdx = lines.findIndex(l=>l.includes("RELEASE_DATE")&&l.includes("TRANSACTION_TYPE"));
   if(headerIdx<0) return [];
   const parseDate = s => {
     if(!s)return new Date().toISOString().slice(0,10);
-    // DD-MM-YYYY
     const p=s.trim().split("-");
     if(p.length===3&&p[2].length===4)return p[2]+"-"+p[1].padStart(2,"0")+"-"+p[0].padStart(2,"0");
     return new Date().toISOString().slice(0,10);
   };
   const parseVal = s => {
     if(!s)return 0;
-    // Remove dots (thousand sep) and replace comma with dot
     return parseFloat(s.trim().replace(/\./g,"").replace(",","."));
   };
-  const SKIP_TYPES = ["rendimentos","dinheiro retirado","pagamento cartão","pagamento de cartão"];
-  const isSkip = t => SKIP_TYPES.some(s=>t.toLowerCase().includes(s));
   return lines.slice(headerIdx+1).map(line=>{
     const c=line.split(";").map(s=>s.replace(/"/g,"").trim());
-    if(c.length<4||!c[0])return null;
-    const tipo=c[1]||"";
+    if(c.length<4||!c[0]||!c[1])return null;
+    const date=parseDate(c[0]);
+    const tipo=(c[1]||"").trim();
     const valor=parseVal(c[3]);
     if(isNaN(valor)||valor===0)return null;
-    // Skip internal transfers (rendimentos, retiradas internas, pagamento fatura)
-    if(isSkip(tipo))return null;
-    // Skip own-name PIX transfers
-    if(isTransfer(tipo))return null;
+    const tLow=tipo.toLowerCase();
+    // Skip: rendimentos, dinheiro retirado emergências (internal wallet move), pagamento cartão
+    if(tLow.includes("rendimento"))return null;
+    // "Dinheiro retirado [nome]" = resgate de caixa/investimento interno = transferência
+    if(tLow.includes("dinheiro retirado"))return{date,descricao:tipo,cat:"Transferência",value:valor,type:valor>=0?"in":"out",src:"CSV",conta:"",status:"efetivado"};
+    if(tLow.includes("pagamento cartão")||tLow.includes("pagamento de cartão")||tLow.includes("pagamento cartao"))
+      return{date,descricao:tipo,cat:"Pgto Cartão",value:valor,type:"out",src:"CSV",conta:"",status:"efetivado"};
+    // Own-name PIX = transferência
+    if(isTransfer(tipo))
+      return{date,descricao:tipo,cat:"Transferência",value:valor,type:valor>=0?"in":"out",src:"CSV",conta:"",status:"efetivado"};
+    // Real transactions
     const isRec=valor>0;
-    return{
-      date:parseDate(c[0]),
-      descricao:tipo,
-      cat:isRec?"Outras Receitas":"Outros",
-      value:valor,
-      type:isRec?"in":"out",
-      src:"CSV",conta:"",status:"efetivado"
-    };
+    return{date,descricao:tipo,cat:isRec?"Outras Receitas":"Outros",value:valor,type:isRec?"in":"out",src:"CSV",conta:"",status:"efetivado"};
   }).filter(Boolean);
 }
 
