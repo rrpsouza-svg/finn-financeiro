@@ -766,7 +766,7 @@ export default function App() {
     for(const file of importFiles){
       const name=file.name.toLowerCase();let parsed=[];
       if(name.endsWith(".pdf")){parsed=await parsePDFWithAI(file);}
-      else{const text=await file.text();if(name.endsWith(".ofx")||text.includes("<STMTTRN>")){parsed=parseOFX(text);}else if(text.includes("Data de Compra;Nome no Cart")){parsed=parseC6(text);}else if(text.toUpperCase().includes("DATA_PAG")||text.toUpperCase().includes("GRUPO_PARCELA")){parsed=parseModeloFinn(text);}else{parsed=parseCSV(text);}}
+      else{const text=await file.text();if(name.endsWith(".ofx")||text.includes("<STMTTRN>")){parsed=parseOFX(text);}else if(text.includes("Data de Compra;Nome no Cart")){parsed=parseC6(text);}else if(text.includes("RELEASE_DATE")||text.includes("INITIAL_BALANCE")){parsed=parseMercadoPago(text);}else if(text.toUpperCase().includes("DATA_PAG")||text.toUpperCase().includes("GRUPO_PARCELA")){parsed=parseModeloFinn(text);}else{parsed=parseCSV(text);}}
       parsed=parsed.map(t=>({...t,conta:t.conta||selectedAccount}));allParsed=[...allParsed,...parsed];
     }
     if(allParsed.length===0){setImporting(false);setImportStep("idle");return;}
