@@ -222,9 +222,18 @@ async function aiCall(messages,system,maxTokens=800) {
   const data=await res.json();return data.content?.map(b=>b.text||"").join("")||null;
 }
 
-async function categorizarComIA(transactions) {
+async function categorizarComIA(transactions, rules=[]) {
   // Skip transfers and preserve installment info
   transactions = transactions.map(t => isTransfer(t.descricao)?{...t,cat:"Transferência",type:"transfer"}:t);
+  // Apply saved rules before calling AI
+  if(rules.length>0){
+    transactions = transactions.map(t=>{
+      const pattern=t.descricao.replace(/\s*[-–]\s*[Pp]arcela.*/,"").replace(/\s*\d+\/\d+/,"").trim().toLowerCase();
+      const valorAprox=Math.round(Math.abs(Number(t.value)));
+      const rule=rules.find(r=>pattern.includes(r.descricao_pattern)&&(!r.valor_aprox||Math.abs(r.valor_aprox-valorAprox)<=1));
+      return rule?{...t,cat:rule.categoria}:t;
+    });
+  }
   const lista=transactions.map((t,i)=>i+"|"+t.descricao+"|"+Math.abs(t.value)).join("\n");
   const reply=await aiCall([{role:"user",content:"Classifique cada transação em uma das categorias: "+CAT_LIST.join(", ")+".\nRetorne APENAS JSON array: [{\"i\":0,\"cat\":\"Categoria\"}]\nTransações:\n"+lista}],"Classificador financeiro. Responda apenas com JSON.",1500);
   if(!reply)return transactions;
@@ -659,6 +668,7 @@ export default function App() {
   const [savingTx,setSavingTx]=useState(false);const [resumo,setResumo]=useState(null);const [resumoLoading,setResumoLoading]=useState(false);
   const [importLog,setImportLog]=useState([]);const [showCashFlow,setShowCashFlow]=useState(false);
   const [budget,setBudget]=useState([]);const [showProjection,setShowProjection]=useState(false);
+  const [catRules,setCatRules]=useState([]);
   const [contasTab,setContasTab]=useState("contas");
   const chatEnd=useRef(null);const fileRef=useRef(null);const recognitionRef=useRef(null);const budgetFileRef=useRef(null);
   const hasAI=!!process.env.REACT_APP_ANTHROPIC_KEY;
@@ -674,6 +684,7 @@ export default function App() {
     supabase.from("transactions").select("*").order("date",{ascending:false}).then(({data})=>{setTxs(data||[]);setLoadingTxs(false);});
     supabase.from("accounts").select("*").order("nome").then(({data})=>setAccounts(data||[]));
     supabase.from("budget").select("*").order("mes").then(({data})=>setBudget(data||[]));
+    supabase.from("categorization_rules").select("*").then(({data})=>setCatRules(data||[]));
     const since=new Date();since.setDate(since.getDate()-30);
     supabase.from("chat_history").select("*").eq("user_id",session.user.id).gte("created_at",since.toISOString()).order("created_at",{ascending:true}).then(({data})=>{if(data&&data.length>0)setChatLog(data.map(m=>({role:m.role,content:m.content})));});
   },[session]);
@@ -734,7 +745,29 @@ export default function App() {
     const{data,error}=await supabase.from("transactions").insert([payload]).select().single();
     if(!error&&data)setTxs(p=>[data,...p]);
   };
-  const updateTx=async(tx)=>{const{error}=await supabase.from("transactions").update({descricao:tx.descricao,value:tx.value,cat:tx.cat,type:tx.type,date:tx.date,conta:tx.conta||"",status:tx.status||"efetivado"}).eq("id",tx.id);setEditTx(null);if(!error){const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});if(data)setTxs(data);}};
+  const updateTx=async(tx)=>{
+    const{error}=await supabase.from("transactions").update({descricao:tx.descricao,value:tx.value,cat:tx.cat,type:tx.type,date:tx.date,conta:tx.conta||"",status:tx.status||"efetivado"}).eq("id",tx.id);
+    if(!error){
+      // Save categorization rule (desc pattern + approx value -> category)
+      const pattern=tx.descricao.replace(/\s*[-–]\s*[Pp]arcela.*/,"").replace(/\s*\d+\/\d+/,"").trim().toLowerCase();
+      const valorAprox=Math.round(Math.abs(Number(tx.value)));
+      const existing=catRules.find(r=>r.descricao_pattern===pattern&&Math.abs((r.valor_aprox||0)-valorAprox)<=1);
+      if(!existing&&pattern){
+        const{data:ruleData}=await supabase.from("categorization_rules").insert([{descricao_pattern:pattern,valor_aprox:valorAprox,categoria:tx.cat}]).select().single();
+        if(ruleData)setCatRules(p=>[...p,ruleData]);
+      } else if(existing&&existing.categoria!==tx.cat){
+        await supabase.from("categorization_rules").update({categoria:tx.cat}).eq("id",existing.id);
+        setCatRules(p=>p.map(r=>r.id===existing.id?{...r,categoria:tx.cat}:r));
+      }
+      // Apply to all installments of same group
+      if(tx.grupo_parcela){
+        await supabase.from("transactions").update({cat:tx.cat,type:tx.type}).eq("grupo_parcela",tx.grupo_parcela);
+      }
+      const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});
+      if(data)setTxs(data);
+    }
+    setEditTx(null);
+  };
   const deleteTx=async(id)=>{await supabase.from("transactions").delete().eq("id",id);setTxs(p=>p.filter(t=>t.id!==id));};
   const deleteBulk=async()=>{
     if(!selectedTxs.size)return;
@@ -774,7 +807,7 @@ export default function App() {
     if(allParsed.length===0){setImporting(false);setImportStep("idle");return;}
     const semCat=allParsed.filter(t=>!t.cat||t.cat==="Outros"||t.cat==="Outras Receitas");
     const comCat=allParsed.filter(t=>t.cat&&t.cat!=="Outros"&&t.cat!=="Outras Receitas");
-    let categorized=[...comCat];if(semCat.length>0&&hasAI){const aiCat=await categorizarComIA(semCat);categorized=[...categorized,...aiCat];}else categorized=[...categorized,...semCat];
+    let categorized=[...comCat];if(semCat.length>0&&hasAI){const aiCat=await categorizarComIA(semCat,catRules);categorized=[...categorized,...aiCat];}else categorized=[...categorized,...semCat];
     const preview=categorized.map(t=>{const dup=txs.find(ex=>{const sv=Math.abs(Math.abs(Number(ex.value))-Math.abs(Number(t.value)))<Math.abs(Number(t.value))*0.01;const sd=ex.descricao?.toLowerCase().slice(0,15)===t.descricao?.toLowerCase().slice(0,15);const sdate=ex.date===t.date;return sv&&(sdate||sd);});return{tx:t,isDuplicate:!!dup,duplicateOf:dup||null,selected:!dup};});
     const selAcc=accounts.find(a=>a.nome===selectedAccount);
     const isCreditCard=selAcc?.tipo==="credito";
