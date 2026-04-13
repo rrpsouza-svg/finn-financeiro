@@ -211,9 +211,22 @@ async function parsePDFWithAI(file) {
   const KEY=process.env.REACT_APP_ANTHROPIC_KEY;if(!KEY)return[];
   const reader=new FileReader();
   const b64=await new Promise((res,rej)=>{reader.onload=()=>res(reader.result.split(",")[1]);reader.onerror=rej;reader.readAsDataURL(file);});
-  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},{type:"text",text:"Extraia TODAS as transações de despesa deste extrato de cartão de crédito brasileiro. Ignore pagamentos de fatura, saldo anterior, totais, juros.\nRetorne APENAS JSON array sem markdown:\n[{\"date\":\"YYYY-MM-DD\",\"descricao\":\"estabelecimento\",\"value\":0.00,\"cat\":\""+CAT_LIST.join("|")+"\",\"parcela_atual\":1,\"total_parcelas\":4,\"grupo_parcela\":\"nome base\"}]\ndate: data da compra YYYY-MM-DD. value: positivo em reais. parcela_atual/total_parcelas: null se à vista."}]}]})});
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},{type:"text",text:"Extraia TODAS as transações deste extrato bancário ou fatura de cartão brasileiro.\nIgnore apenas: SALDO DO DIA, totais, saldos, juros e encargos financeiros.\nPara CONTA CORRENTE: inclua entradas (TED, PIX recebido, créditos) E saídas (PIX enviado, tarifas, débitos).\nPara CARTÃO DE CRÉDITO: inclua compras e estornos. Ignore pagamentos de fatura.\nRetorne APENAS JSON array sem markdown:\n[{\"date\":\"YYYY-MM-DD\",\"descricao\":\"descrição\",\"value\":0.00,\"type\":\"in|out\",\"cat\":\"" + CAT_LIST.join("|") + "\"|\"parcela_atual\":null,\"total_parcelas\":null}]\nCategorias especiais: use Transferência para PIX/TED entre contas próprias, Pgto Cartão para pagamentos de cartão de crédito.\ndate: YYYY-MM-DD. value: sempre positivo. type: in=entrada out=saída."}]}]})});
   const data=await res.json();const raw=data.content?.map(b=>b.text||"").join("")||"[]";
-  try{const arr=JSON.parse(raw.replace(/```json|```/g,"").trim());return arr.map(t=>({date:t.date,data_compra:t.date,descricao:t.descricao,cat:t.cat||"Outros",value:-Math.abs(t.value),type:"out",src:"PDF",conta:"",status:"pendente",parcela_atual:t.parcela_atual||null,total_parcelas:t.total_parcelas||null,grupo_parcela:t.grupo_parcela||""}));}catch{return[];}
+  try{const arr=JSON.parse(raw.replace(/```json|```/g,"").trim());return arr.map(t=>{
+        const isIn=t.type==="in";
+        const desc=t.descricao||"Transação";
+        const transf=isTransfer(desc);
+        return{date:t.date,data_compra:t.date,descricao:desc,
+          cat:transf?"Transferência":(t.cat||"Outros"),
+          value:isIn?Math.abs(t.value):-Math.abs(t.value),
+          type:transf?(isIn?"in":"out"):(isIn?"in":"out"),
+          src:"PDF",conta:"",
+          status:"efetivado",
+          parcela_atual:t.parcela_atual||null,
+          total_parcelas:t.total_parcelas||null,
+          grupo_parcela:t.grupo_parcela||""};
+      });}catch{return[];}
 }
 
 async function aiCall(messages,system,maxTokens=800) {
