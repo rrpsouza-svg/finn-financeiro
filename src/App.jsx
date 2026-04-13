@@ -15,6 +15,7 @@ const M = "'JetBrains Mono',monospace";
 
 const CATS = {
   "Transferência":  {icon:"🔄",color:"#94a3b8"},
+  "Estorno/Crédito":{icon:"↩️",color:"#22c77a"},
   Moradia:          {icon:"🏠",color:"#7c6af0"},
   "Alimentação":    {icon:"🍽️",color:"#f0884a"},
   Transporte:       {icon:"🚗",color:"#4fa3f0"},
@@ -77,13 +78,18 @@ function parseOFX(text) {
     const desc=get("MEMO")||get("NAME")||"Transação";
     const transf=isTransfer(desc);
     if(transf)return{date,descricao:desc,cat:"Transferência",value:amt,type:"transfer",src:"OFX",conta:"",status:"efetivado"};
-    // Credit card: DEBIT=compra(negativo), CREDIT=estorno(positivo vira abatimento de despesa)
+    // Credit card OFX:
+    // - DEBIT / amt<0 = compra (despesa pendente)
+    // - CREDIT / amt>0 = estorno (receita/abatimento) — KEEP POSITIVE
+    // - "Pagamento recebido" or "Pagamento de fatura" = ignorar
     if(isCreditCard){
+      const isPagamento=desc.toLowerCase().includes("pagamento recebido")||desc.toLowerCase().includes("pagamento de fatura")||desc.toLowerCase().includes("payment");
+      if(isPagamento)return null;
       if(amt>0){
-        // Estorno - reduz despesa (entra como valor negativo de despesa)
-        const isEstorno=desc.toLowerCase().includes("estorno")||trnType==="CREDIT";
-        return{date,descricao:desc,cat:"Outros",value:-amt,type:"out",src:"OFX",conta:"",status:"pendente",isEstorno:true};
+        // Estorno — entra como receita positiva (abate do total gasto)
+        return{date,descricao:desc,cat:"Estorno/Crédito",value:amt,type:"in",src:"OFX",conta:"",status:"efetivado"};
       }
+      // Compra normal — despesa pendente
       const inst=parseInstallment(desc);
       return{date,descricao:desc,cat:"Outros",value:amt,type:"out",src:"OFX",conta:"",status:"pendente",
         parcela_atual:inst?.atual||null,total_parcelas:inst?.total||null,
