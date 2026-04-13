@@ -15,6 +15,7 @@ const M = "'JetBrains Mono',monospace";
 
 const CATS = {
   "Transferência":  {icon:"🔄",color:"#94a3b8"},
+  "Pgto Cartão":    {icon:"💳",color:"#64748b"},
   "Estorno/Crédito":{icon:"↩️",color:"#22c77a"},
   Moradia:          {icon:"🏠",color:"#7c6af0"},
   "Alimentação":    {icon:"🍽️",color:"#f0884a"},
@@ -40,7 +41,9 @@ const isTransfer = desc => {
   const isFatura = d.includes("pagamento de fatura") || d.includes("pagamento fatura");
   // Resgates e aplicações são movimentações entre contas próprias
   const isInvestMove = d.includes("resgate") || d.includes("aplicação") || d.includes("aplicacao") || d.includes("resgate rdb") || d.includes("rdb") || d.includes("cdb") || d.includes("rendimento");
-  return (isPixTransfer && isOwnName) || isFatura || isInvestMove;
+  // Pagamento de boleto bancário = pagamento de cartão de crédito
+  const isPgtoCartao = d.includes("pagamento de boleto") || d.includes("pag boleto") || d.includes("pagto boleto");
+  return (isPixTransfer && isOwnName) || isFatura || isInvestMove || isPgtoCartao;
 };
 const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c) && c !== "Transferência");
 const CAT_LIST     = Object.keys(CATS);
@@ -79,7 +82,8 @@ function parseOFX(text) {
     const trnType=get("TRNTYPE").toUpperCase();
     const desc=get("MEMO")||get("NAME")||"Transação";
     const transf=isTransfer(desc);
-    if(transf)return{date,descricao:desc,cat:"Transferência",value:amt,type:amt>=0?"in":"out",src:"OFX",conta:"",status:"efetivado"};
+    const isPgto = desc.toLowerCase().includes("pagamento de boleto")||desc.toLowerCase().includes("pag boleto")||desc.toLowerCase().includes("pagto boleto");
+    if(transf)return{date,descricao:desc,cat:isPgto?"Pgto Cartão":"Transferência",value:amt,type:amt>=0?"in":"out",src:"OFX",conta:"",status:"efetivado"};
     // Credit card OFX:
     // - DEBIT / amt<0 = compra (despesa pendente)
     // - CREDIT / amt>0 = estorno (receita/abatimento) — KEEP POSITIVE
@@ -481,7 +485,7 @@ function EditModal({tx,onSave,onClose,accounts}) {
     </div>
     <div style={{marginBottom:12}}><label style={lbl}>Conta</label><select style={{...inp,padding:"10px 14px"}} value={form.conta} onChange={e=>setForm(f=>({...f,conta:e.target.value}))}><option value="">-- Selecione --</option>{accounts.map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}</select></div>
     <div style={{marginBottom:12}}><label style={lbl}>Status</label><select style={{...inp,padding:"10px 14px"}} value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))}><option value="efetivado">Efetivado</option><option value="pendente">Pendente</option></select></div>
-    <div style={{marginBottom:20}}><label style={lbl}>Categoria</label><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{["Transferência","Estorno/Crédito",...EXPENSE_CATS,...INCOME_CATS].map(c=>(<button key={c} onClick={()=>setForm(f=>({...f,cat:c,type:INCOME_CATS.includes(c)?"in":"out"}))} style={{padding:"6px 11px",borderRadius:99,border:"1.5px solid "+(form.cat===c?CATS[c].color:T.border),background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>))}</div></div>
+    <div style={{marginBottom:20}}><label style={lbl}>Categoria</label><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{["Transferência","Pgto Cartão","Estorno/Crédito",...EXPENSE_CATS,...INCOME_CATS].map(c=>(<button key={c} onClick={()=>setForm(f=>({...f,cat:c,type:INCOME_CATS.includes(c)?"in":"out"}))} style={{padding:"6px 11px",borderRadius:99,border:"1.5px solid "+(form.cat===c?CATS[c].color:T.border),background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>))}</div></div>
     <button onClick={()=>onSave({...tx,descricao:form.descricao,value:INCOME_CATS.includes(form.cat)?Math.abs(parseFloat(form.value)):-Math.abs(parseFloat(form.value)),cat:form.cat,type:INCOME_CATS.includes(form.cat)?"in":"out",date:form.date,conta:form.conta,status:form.status})} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer"}}>Salvar</button>
   </div></div>);
 }
@@ -691,10 +695,10 @@ export default function App() {
   });
 
   // Include ALL expenses (pending too) for categories
-  const income=filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Number(t.value),0);
-  const expense=filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const income=filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente"&&t.cat!=="Transferência"&&t.cat!=="Pgto Cartão").reduce((a,t)=>a+Number(t.value),0);
+  const expense=filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&t.cat!=="Transferência"&&t.cat!=="Pgto Cartão").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
   // Pending expenses minus pending estornos (credits)
-  const pendingExpense=filteredTxs.filter(t=>t.status==="pendente"&&t.cat!=="Transferência").reduce((a,t)=>{
+  const pendingExpense=filteredTxs.filter(t=>t.status==="pendente"&&t.cat!=="Transferência"&&t.cat!=="Pgto Cartão").reduce((a,t)=>{
     const v=t.type==="out"?Math.abs(Number(t.value)):-Math.abs(Number(t.value));return a+v;},0);
   const balance=income-expense;
   const savPct=income>0?(balance/income*100):0;
