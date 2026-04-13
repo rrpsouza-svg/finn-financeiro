@@ -38,7 +38,9 @@ const isTransfer = desc => {
   const isPixTransfer = d.includes("transferência") || d.includes("transferencia") || d.includes("pix");
   const isOwnName = TRANSFER_NAMES.some(n => d.includes(n));
   const isFatura = d.includes("pagamento de fatura") || d.includes("pagamento fatura");
-  return (isPixTransfer && isOwnName) || isFatura;
+  // Resgates e aplicações são movimentações entre contas próprias
+  const isInvestMove = d.includes("resgate") || d.includes("aplicação") || d.includes("aplicacao") || d.includes("resgate rdb") || d.includes("rdb") || d.includes("cdb") || d.includes("rendimento");
+  return (isPixTransfer && isOwnName) || isFatura || isInvestMove;
 };
 const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c) && c !== "Transferência");
 const CAT_LIST     = Object.keys(CATS);
@@ -479,7 +481,7 @@ function EditModal({tx,onSave,onClose,accounts}) {
     </div>
     <div style={{marginBottom:12}}><label style={lbl}>Conta</label><select style={{...inp,padding:"10px 14px"}} value={form.conta} onChange={e=>setForm(f=>({...f,conta:e.target.value}))}><option value="">-- Selecione --</option>{accounts.map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}</select></div>
     <div style={{marginBottom:12}}><label style={lbl}>Status</label><select style={{...inp,padding:"10px 14px"}} value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))}><option value="efetivado">Efetivado</option><option value="pendente">Pendente</option></select></div>
-    <div style={{marginBottom:20}}><label style={lbl}>Categoria</label><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{[...EXPENSE_CATS,...INCOME_CATS].map(c=>(<button key={c} onClick={()=>setForm(f=>({...f,cat:c,type:INCOME_CATS.includes(c)?"in":"out"}))} style={{padding:"6px 11px",borderRadius:99,border:"1.5px solid "+(form.cat===c?CATS[c].color:T.border),background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>))}</div></div>
+    <div style={{marginBottom:20}}><label style={lbl}>Categoria</label><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{["Transferência","Estorno/Crédito",...EXPENSE_CATS,...INCOME_CATS].map(c=>(<button key={c} onClick={()=>setForm(f=>({...f,cat:c,type:INCOME_CATS.includes(c)?"in":"out"}))} style={{padding:"6px 11px",borderRadius:99,border:"1.5px solid "+(form.cat===c?CATS[c].color:T.border),background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>))}</div></div>
     <button onClick={()=>onSave({...tx,descricao:form.descricao,value:INCOME_CATS.includes(form.cat)?Math.abs(parseFloat(form.value)):-Math.abs(parseFloat(form.value)),cat:form.cat,type:INCOME_CATS.includes(form.cat)?"in":"out",date:form.date,conta:form.conta,status:form.status})} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer"}}>Salvar</button>
   </div></div>);
 }
