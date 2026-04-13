@@ -86,8 +86,8 @@ function parseOFX(text) {
       const isPagamento=desc.toLowerCase().includes("pagamento recebido")||desc.toLowerCase().includes("pagamento de fatura")||desc.toLowerCase().includes("payment");
       if(isPagamento)return null;
       if(amt>0){
-        // Estorno — entra como receita positiva (abate do total gasto)
-        return{date,descricao:desc,cat:"Estorno/Crédito",value:amt,type:"in",src:"OFX",conta:"",status:"efetivado"};
+        // Estorno — abate da fatura, entra como despesa negativa (pendente) para reduzir o total
+        return{date,descricao:desc,cat:"Estorno/Crédito",value:amt,type:"out",src:"OFX",conta:"",status:"pendente"};
       }
       // Compra normal — despesa pendente
       const inst=parseInstallment(desc);
@@ -609,7 +609,7 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
   const MONTHS_PT2=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
   const faturasPendentes=accounts.filter(a=>a.tipo==="credito"&&a.ativo).flatMap(acc=>{
     const pend=txs.filter(t=>t.conta===acc.nome&&t.status==="pendente"&&t.type==="out");
-    const g={};pend.forEach(t=>{const m=t.fatura_mes||t.date?.slice(0,7)||"";if(!g[m])g[m]={mes:m,total:0,ids:[]};g[m].total+=Math.abs(Number(t.value));g[m].ids.push(t.id);});
+    const g={};pend.forEach(t=>{const m=t.fatura_mes||t.date?.slice(0,7)||"";if(!g[m])g[m]={mes:m,total:0,ids:[]};const v=t.cat==="Estorno/Crédito"?-Math.abs(Number(t.value)):Math.abs(Number(t.value));g[m].total+=v;g[m].ids.push(t.id);});
     return Object.values(g).map(x=>({...x,conta:acc}));
   });
   const saveAccount=async(acc)=>{setSaving(true);if(acc.id){const{data}=await supabase.from("accounts").update({nome:acc.nome,saldo_inicial:acc.saldo_inicial,limite:acc.limite,dia_vencimento:acc.dia_vencimento,dia_fechamento:acc.dia_fechamento,ativo:acc.ativo}).eq("id",acc.id).select().single();if(data)setAccounts(p=>p.map(a=>a.id===acc.id?data:a));}else{const{data}=await supabase.from("accounts").insert([acc]).select().single();if(data)setAccounts(p=>[...p,data]);}setEditAcc(null);setSaving(false);};
@@ -687,7 +687,8 @@ export default function App() {
   // Include ALL expenses (pending too) for categories
   const income=filteredTxs.filter(t=>t.type==="in"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Number(t.value),0);
   const expense=filteredTxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-  const pendingExpense=filteredTxs.filter(t=>t.type==="out"&&t.status==="pendente"&&t.cat!=="Transferência").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+  const pendingExpense=filteredTxs.filter(t=>t.type==="out"&&t.status==="pendente"&&t.cat!=="Transferência").reduce((a,t)=>{
+    const v=t.cat==="Estorno/Crédito"?-Math.abs(Number(t.value)):Math.abs(Number(t.value));return a+v;},0);
   const balance=income-expense;
   const savPct=income>0?(balance/income*100):0;
   const prevMonthKey=()=>{const[y,m]=selMonth.split("-").map(Number);const d=new Date(y,m-2,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");};
@@ -904,7 +905,7 @@ export default function App() {
           <div style={card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span><button onClick={()=>setPage("extrato")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver extrato</button></div>
             {filteredTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação neste período.</div>}
-            {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
+            {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.cat==="Estorno/Crédito"?T.green:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{(t.type==="in"||t.cat==="Estorno/Crédito")?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
           </div>
         </>}
       </>}
@@ -1012,7 +1013,7 @@ export default function App() {
                 {t.user_email&&t.user_email!==session?.user?.email&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:99,background:T.accentLt,color:T.accent,fontWeight:700}}>👩 {t.user_email.split("@")[0]}</span>}
               </div>
             </div>
-            <span style={{fontSize:13,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span>
+            <span style={{fontSize:13,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.cat==="Estorno/Crédito"?T.green:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0}}>{t.type==="in"?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span>
             <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
               <button onClick={()=>setEditTx(t)} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:14,padding:"0 2px"}}>✏️</button>
               <button onClick={()=>deleteTx(t.id)} style={{background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,padding:"0 2px"}}>🗑️</button>
