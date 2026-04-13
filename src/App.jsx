@@ -40,7 +40,7 @@ const isTransfer = desc => {
   const isOwnName = TRANSFER_NAMES.some(n => d.includes(n));
   const isFatura = d.includes("pagamento de fatura") || d.includes("pagamento fatura");
   // Resgates e aplicações são movimentações entre contas próprias
-  const isInvestMove = d.includes("resgate") || d.includes("aplicação") || d.includes("aplicacao") || d.includes("resgate rdb") || d.includes("rdb") || d.includes("cdb") || d.includes("rendimento");
+  const isInvestMove = d.includes("resgate") || d.includes("aplicação") || d.includes("aplicacao") || d.includes("resgate rdb") || d.includes("rdb") || d.includes("cdb");
   // Pagamento de boleto bancário = pagamento de cartão de crédito
   const isPgtoCartao = d.includes("pagamento de boleto") || d.includes("pag boleto") || d.includes("pagto boleto");
   return (isPixTransfer && isOwnName) || isFatura || isInvestMove || isPgtoCartao;
@@ -172,7 +172,9 @@ function parseMercadoPago(text) {
     if(isNaN(valor)||valor===0)return null;
     const tLow=tipo.toLowerCase();
     // Skip: rendimentos, dinheiro retirado emergências (internal wallet move), pagamento cartão
-    if(tLow.includes("rendimento"))return null;
+    // Rendimentos = receita de juros da conta corrente
+    if(tLow.includes("rendimento"))
+      return{date,descricao:tipo,cat:"Outras Receitas",value:valor,type:"in",src:"CSV",conta:"",status:"efetivado"};
     // "Dinheiro retirado [nome]" = resgate de caixa/investimento interno = transferência
     if(tLow.includes("dinheiro retirado"))return{date,descricao:tipo,cat:"Transferência",value:valor,type:valor>=0?"in":"out",src:"CSV",conta:"",status:"efetivado"};
     if(tLow.includes("pagamento cartão")||tLow.includes("pagamento de cartão")||tLow.includes("pagamento cartao"))
