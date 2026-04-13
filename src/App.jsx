@@ -22,9 +22,12 @@ const CATS = {
   Transporte:       {icon:"🚗",color:"#4fa3f0"},
   "Saúde":          {icon:"💊",color:"#f04f6a"},
   Lazer:            {icon:"🎬",color:"#f5b544"},
+  Viagens:          {icon:"✈️",color:"#0284c7"},
   Assinaturas:      {icon:"📱",color:"#22c77a"},
   "Educação":       {icon:"📚",color:"#5b6af0"},
-  Roupas:           {icon:"👗",color:"#e879a8"},
+  "Compras & Presentes":{icon:"🛍️",color:"#e879a8"},
+  Pets:             {icon:"🐾",color:"#d97706"},
+  Terceiros:        {icon:"🤝",color:"#7c3aed"},
   Investimento:     {icon:"📈",color:"#0ea5e9"},
   Outros:           {icon:"📦",color:"#8b93b0"},
   "Receita Raphael":{icon:"👨",color:"#22c77a"},
@@ -45,7 +48,7 @@ const isTransfer = desc => {
   const isPgtoCartao = d.includes("pagamento de boleto") || d.includes("pag boleto") || d.includes("pagto boleto");
   return (isPixTransfer && isOwnName) || isFatura || isInvestMove || isPgtoCartao;
 };
-const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c) && c !== "Transferência");
+const EXPENSE_CATS = Object.keys(CATS).filter(c => !INCOME_CATS.includes(c) && c !== "Transferência" && c !== "Pgto Cartão" && c !== "Estorno/Crédito");
 const CAT_LIST     = Object.keys(CATS);
 
 const DEFAULT_GOALS = {
@@ -133,7 +136,7 @@ function parseC6(text) {
   const lines=text.trim().split("\n").map(l=>l.replace("\r","")).filter(Boolean);
   if(lines.length<2)return[];
   const parseDate=s=>{if(!s)return new Date().toISOString().slice(0,10);const p=s.trim().split("/");if(p.length===3)return p[2]+"-"+p[1].padStart(2,"0")+"-"+p[0].padStart(2,"0");return new Date().toISOString().slice(0,10);};
-  const C6MAP={"Alimentação":"Alimentação","Restaurante":"Alimentação","Supermercado":"Alimentação","Saúde":"Saúde","Farmácia":"Saúde","Médic":"Saúde","Transporte":"Transporte","Combustível":"Transporte","Educação":"Educação","Lazer":"Lazer","Vestuário":"Roupas","Assinatura":"Assinaturas","Streaming":"Assinaturas"};
+  const C6MAP={"Alimentação":"Alimentação","Restaurante":"Alimentação","Supermercado":"Alimentação","Saúde":"Saúde","Farmácia":"Saúde","Médic":"Saúde","Transporte":"Transporte","Combustível":"Transporte","Educação":"Educação","Lazer":"Lazer","Vestuário":"Compras & Presentes","Assinatura":"Assinaturas","Streaming":"Assinaturas"};
   const mapCat=(c6,desc)=>{const s=(c6||"")+" "+(desc||"");for(const[k,v]of Object.entries(C6MAP))if(s.toLowerCase().includes(k.toLowerCase()))return v;return"Outros";};
   return lines.slice(1).map(line=>{
     const c=line.split(";").map(s=>s.replace(/"/g,"").trim());
@@ -506,7 +509,7 @@ function EditModal({tx,onSave,onClose,accounts}) {
     </div>
     <div style={{marginBottom:12}}><label style={lbl}>Conta</label><select style={{...inp,padding:"10px 14px"}} value={form.conta} onChange={e=>setForm(f=>({...f,conta:e.target.value}))}><option value="">-- Selecione --</option>{accounts.map(a=><option key={a.id} value={a.nome}>{a.nome}</option>)}</select></div>
     <div style={{marginBottom:12}}><label style={lbl}>Status</label><select style={{...inp,padding:"10px 14px"}} value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))}><option value="efetivado">Efetivado</option><option value="pendente">Pendente</option></select></div>
-    <div style={{marginBottom:20}}><label style={lbl}>Categoria</label><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{["Transferência","Pgto Cartão","Estorno/Crédito",...EXPENSE_CATS,...INCOME_CATS].map(c=>(<button key={c} onClick={()=>setForm(f=>({...f,cat:c,type:INCOME_CATS.includes(c)?"in":"out"}))} style={{padding:"6px 11px",borderRadius:99,border:"1.5px solid "+(form.cat===c?CATS[c].color:T.border),background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>))}</div></div>
+    <div style={{marginBottom:20}}><label style={lbl}>Categoria</label><div style={{display:"flex",flexWrap:"wrap",gap:7}}>{[...Object.keys(CATS)].map(c=>(<button key={c} onClick={()=>setForm(f=>({...f,cat:c,type:INCOME_CATS.includes(c)?"in":"out"}))} style={{padding:"6px 11px",borderRadius:99,border:"1.5px solid "+(form.cat===c?CATS[c].color:T.border),background:form.cat===c?CATS[c].color+"22":"transparent",color:form.cat===c?CATS[c].color:T.sub,fontFamily:F,fontSize:12,fontWeight:600,cursor:"pointer"}}>{CATS[c].icon} {c}</button>))}</div></div>
     <button onClick={()=>onSave({...tx,descricao:form.descricao,value:INCOME_CATS.includes(form.cat)?Math.abs(parseFloat(form.value)):-Math.abs(parseFloat(form.value)),cat:form.cat,type:INCOME_CATS.includes(form.cat)?"in":"out",date:form.date,conta:form.conta,status:form.status})} style={{width:"100%",padding:"14px",background:T.accent,color:"#fff",border:"none",borderRadius:12,fontFamily:F,fontSize:15,fontWeight:700,cursor:"pointer"}}>Salvar</button>
   </div></div>);
 }
