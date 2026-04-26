@@ -850,7 +850,7 @@ export default function App() {
     const semCat=allParsed.filter(t=>!t.cat||t.cat==="Outros"||t.cat==="Outras Receitas");
     const comCat=allParsed.filter(t=>t.cat&&t.cat!=="Outros"&&t.cat!=="Outras Receitas");
     let categorized=[...comCat];if(semCat.length>0&&hasAI){const aiCat=await categorizarComIA(semCat,catRules);categorized=[...categorized,...aiCat];}else categorized=[...categorized,...semCat];
-    const preview=categorized.map(t=>{const dup=txs.find(ex=>{const sv=Math.abs(Math.abs(Number(ex.value))-Math.abs(Number(t.value)))<Math.abs(Number(t.value))*0.01;const sd=ex.descricao?.toLowerCase().slice(0,15)===t.descricao?.toLowerCase().slice(0,15);const sdate=ex.date===t.date;return sv&&(sdate||sd);});return{tx:t,isDuplicate:!!dup,duplicateOf:dup||null,selected:!dup};});
+    const preview=categorized.map(t=>{const dup=txs.find(ex=>{const sv=Math.abs(Math.abs(Number(ex.value))-Math.abs(Number(t.value)))<Math.abs(Number(t.value))*0.01;const sd=ex.descricao?.toLowerCase().slice(0,15)===t.descricao?.toLowerCase().slice(0,15);const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const dayDiff=tCompra&&exCompra?Math.abs((new Date(tCompra)-new Date(exCompra))/(1000*60*60*24)):999;const sdate=dayDiff<=3;return sv&&sd&&sdate;});return{tx:t,isDuplicate:!!dup,duplicateOf:dup||null,selected:!dup};});
     const selAcc=accounts.find(a=>a.nome===selectedAccount);
     const isCreditCard=selAcc?.tipo==="credito";
     let futuras=[];if(isCreditCard&&faturaMes){futuras=gerarParcelasFuturas(categorized,txs,faturaMes);}
