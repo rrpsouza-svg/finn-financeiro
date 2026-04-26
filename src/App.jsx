@@ -636,7 +636,7 @@ function BudgetPage({budget,setBudget}) {
 function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
   const [editAcc,setEditAcc]=useState(null);const [saving,setSaving]=useState(false);
   const [pagarFatura,setPagarFatura]=useState(null);const [contaDebito,setContaDebito]=useState("");const [pagando,setPagando]=useState(false);
-  const [faturaFiltro,setFaturaFiltro]=useState("all");
+  const [faturaFiltro,setFaturaFiltro]=useState("all");const [faturaContaFiltro,setFaturaContaFiltro]=useState("all");
   const [showAllFaturas,setShowAllFaturas]=useState(false);
   const TIPO_ICONS={CC:"🏦",credito:"💳",investimento:"📈"};
   const MONTHS_PT2=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -659,7 +659,7 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
       const now=new Date();
       const currentMes=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
       const [fatFilter,setFatFilter]=[faturaFiltro,setFaturaFiltro];
-      const filtered=fatFilter==="all"?faturasPendentes:faturasPendentes.filter(f=>f.mes===fatFilter);
+      const [fatContaFilter,setFatContaFilter]=[faturaContaFiltro,setFaturaContaFiltro];const filtered=(fatFilter==="all"?faturasPendentes:faturasPendentes.filter(f=>f.mes===fatFilter)).filter(f=>fatContaFilter==="all"||f.conta.nome===fatContaFilter);const allContas=[...new Set(faturasPendentes.map(f=>f.conta.nome))].sort();
       const sorted=filtered.sort((a,b)=>a.mes.localeCompare(b.mes));
       const vencidas=sorted.filter(f=>f.mes<=currentMes);
       const futuras=sorted.filter(f=>f.mes>currentMes);
@@ -667,10 +667,7 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
       return(<div style={{marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div style={{fontSize:11,fontWeight:700,color:T.sub,textTransform:"uppercase",letterSpacing:.8}}>⏳ Faturas pendentes ({faturasPendentes.length})</div>
-          <select value={fatFilter} onChange={e=>setFatFilter(e.target.value)} style={{padding:"4px 8px",border:"1px solid "+T.border,borderRadius:6,fontFamily:F,fontSize:11,outline:"none",background:"#fff",color:T.dark}}>
-            <option value="all">Todos os meses</option>
-            {allMeses.map(m=>{const[y,mo]=m.split("-").map(Number);return<option key={m} value={m}>{MONTHS_PT2[mo-1]} {y}</option>;})}
-          </select>
+          <div style={{display:"flex",gap:6}}><select value={fatContaFilter} onChange={e=>setFatContaFilter(e.target.value)} style={{padding:"4px 8px",border:"1px solid "+T.border,borderRadius:6,fontFamily:F,fontSize:11,outline:"none",background:"#fff",color:T.dark}}><option value="all">Todos os cartões</option>{allContas.map(c=><option key={c} value={c}>{c}</option>)}</select><select value={fatFilter} onChange={e=>setFatFilter(e.target.value)} style={{padding:"4px 8px",border:"1px solid "+T.border,borderRadius:6,fontFamily:F,fontSize:11,outline:"none",background:"#fff",color:T.dark}}><option value="all">Todos os meses</option>{allMeses.map(m=>{const[y,mo]=m.split("-").map(Number);return<option key={m} value={m}>{MONTHS_PT2[mo-1]} {y}</option>;})}</select></div>
         </div>
         {vencidas.length>0&&<div style={{fontSize:10,color:T.red,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>🔴 Vencidas/Este mês</div>}
         {vencidas.map((f,i)=>{const[y,m]=f.mes.split("-").map(Number);return(<div key={i} style={{background:"#fef2f2",borderRadius:14,padding:14,marginBottom:8,border:"1px solid #fca5a5"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:700,color:"#991b1b"}}>{f.conta.nome}</div><div style={{fontSize:11,color:"#dc2626",marginTop:2}}>Fatura {MONTHS_PT2[m-1]} {y} · {f.ids.length} lanç.</div></div><div style={{textAlign:"right"}}><div style={{fontSize:15,fontWeight:800,color:"#dc2626",fontFamily:M}}>{"R$"+f.total.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div><button onClick={()=>{setPagarFatura(f);setContaDebito("");}} style={{marginTop:4,padding:"5px 10px",background:"#dc2626",color:"#fff",border:"none",borderRadius:8,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer"}}>Pagar →</button></div></div></div>);})}
