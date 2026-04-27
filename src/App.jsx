@@ -297,17 +297,19 @@ function parseBudgetCSV(text) {
 }
 
 // ── Cash flow projection ──
-function buildProjection(txs, budget) {
+function buildProjection(txs, budget, maxFutureMonths=12) {
+  const TRANSF_CATS=["Transferência","Pgto Cartão"];
   const now = new Date();
   const currentMes = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
-  // Find last pending/future transaction date
-  const lastDate = txs.reduce((max,t)=>{
+  // Cap end date at currentMes + maxFutureMonths
+  const capDate = new Date(now.getFullYear(), now.getMonth()+maxFutureMonths, 1);
+  const lastPendDate = txs.filter(t=>t.status==="pendente").reduce((max,t)=>{
     const d = t.fatura_mes||t.date?.slice(0,7)||"";
     return d>max?d:max;
   }, currentMes);
-  const [ly,lm] = lastDate.split("-").map(Number);
-  const endDate = new Date(ly, lm, 1);
-  // Build month range from current to end
+  const [ly,lm] = lastPendDate.split("-").map(Number);
+  const endDate = new Date(Math.min(new Date(ly,lm,1).getTime(), capDate.getTime()));
+  // Build month range
   const months = [];
   let cur = new Date(now.getFullYear(), now.getMonth(), 1);
   while (cur<=endDate) {
@@ -318,29 +320,25 @@ function buildProjection(txs, budget) {
     const mtxs = txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes);
     const isPast = mes < currentMes;
     const isCurrent = mes === currentMes;
-    const realRec   = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente").reduce((a,t)=>a+Number(t.value),0);
-    const efectDesp = mtxs.filter(t=>t.type==="out"&&t.status!=="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-    const pendDesp  = mtxs.filter(t=>t.type==="out"&&t.status==="pendente").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+    // Exclude transfers from income/expense
+    const realRec   = mtxs.filter(t=>t.type==="in"&&t.status!=="pendente"&&!TRANSF_CATS.includes(t.cat)).reduce((a,t)=>a+Number(t.value),0);
+    const efectDesp = mtxs.filter(t=>t.type==="out"&&t.status!=="pendente"&&!TRANSF_CATS.includes(t.cat)).reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+    const pendDesp  = mtxs.filter(t=>t.type==="out"&&t.status==="pendente"&&!TRANSF_CATS.includes(t.cat)).reduce((a,t)=>a+Math.abs(Number(t.value)),0);
     const bMes = budget.filter(b=>b.mes===mes);
     const budgRec  = bMes.filter(b=>b.tipo?.toLowerCase().includes("receit")).reduce((a,b)=>a+Number(b.valor),0);
     const budgDesp = bMes.filter(b=>b.tipo?.toLowerCase().includes("desp")).reduce((a,b)=>a+Number(b.valor),0);
     const [y,m] = mes.split("-").map(Number);
     let totalRec, totalDesp;
     if (isPast) {
-      // Past: only real data
       totalRec  = realRec;
       totalDesp = efectDesp + pendDesp;
     } else if (isCurrent) {
-      // Current: use the larger of real or budget (may still receive more)
       totalRec = Math.max(realRec, budgRec);
-      // Expense: already committed (efetivado+pendente) + budget remainder if any
       const committed = efectDesp + pendDesp;
       const budgRemainder = Math.max(0, budgDesp - committed);
       totalDesp = committed + budgRemainder;
     } else {
-      // Future: receipt = budget; expense = max(pendente, budget) — never double count
       totalRec  = budgRec;
-      // If pending already exceeds budget, use pending; else use budget (which includes pending)
       totalDesp = Math.max(pendDesp, budgDesp);
     }
     return {mes, label:MONTHS_PT[m-1].slice(0,3)+" "+String(y).slice(2),
@@ -348,8 +346,8 @@ function buildProjection(txs, budget) {
   });
 }
 
-function ProjectionChart({txs,budget}) {
-  const proj=buildProjection(txs,budget);
+function ProjectionChart({txs,budget,range=12}) {
+  const proj=buildProjection(txs,budget,range);
   if(!proj.length)return <div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Sem dados para projeção.</div>;
   const maxVal=Math.max(...proj.flatMap(p=>[p.totalRec,p.totalDesp]),1);
   const bW=16,gap=4,gW=bW*2+gap+6,cH=120;
@@ -706,7 +704,7 @@ export default function App() {
   const [filterDataCompra,setFilterDataCompra]=useState("all");
   const [savingTx,setSavingTx]=useState(false);const [resumo,setResumo]=useState(null);const [resumoLoading,setResumoLoading]=useState(false);
   const [importLog,setImportLog]=useState([]);const [showCashFlow,setShowCashFlow]=useState(false);
-  const [budget,setBudget]=useState([]);const [showProjection,setShowProjection]=useState(false);
+  const [budget,setBudget]=useState([]);const [showProjection,setShowProjection]=useState(false);const [projRange,setProjRange]=useState(12);
   const [catRules,setCatRules]=useState([]);
   const [contasTab,setContasTab]=useState("contas");
   const chatEnd=useRef(null);const fileRef=useRef(null);const recognitionRef=useRef(null);const budgetFileRef=useRef(null);
@@ -952,12 +950,12 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
           <div style={card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showProjection?12:0}}>
               <div>
-                <div style={{fontWeight:700,fontSize:14}}>📈 Projeção de Fluxo de Caixa</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{fontWeight:700,fontSize:14}}>📈 Projeção de Fluxo de Caixa</div><select value={projRange} onChange={e=>setProjRange(Number(e.target.value))} style={{padding:"3px 7px",border:"1.5px solid "+T.border,borderRadius:6,fontFamily:F,fontSize:11,outline:"none",background:"#fff",color:T.dark}}><option value={3}>3 meses</option><option value={6}>6 meses</option><option value={12}>12 meses</option><option value={24}>24 meses</option><option value={999}>Tudo</option></select></div>
                 {showProjection&&<div style={{fontSize:11,color:T.sub,marginTop:2}}>Até a última parcela projetada · barras claras = estimativa</div>}
               </div>
               <button onClick={()=>setShowProjection(!showProjection)} style={{background:T.accentLt,border:"none",borderRadius:8,padding:"5px 10px",color:T.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:F,flexShrink:0}}>{showProjection?"Ocultar":"Ver projeção"}</button>
             </div>
-            {showProjection&&<ProjectionChart txs={txs} budget={budget}/>}
+            {showProjection&&<ProjectionChart txs={txs} budget={budget} range={projRange}/>}
           </div>
 
           {catData.length>0&&<div style={card}>
