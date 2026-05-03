@@ -369,7 +369,7 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
   const mesLabel=m=>{if(!m)return"—";const[y,mo]=m.split("-").map(Number);return(MONTHS_PT[mo-1]||m)+" "+y;};
   const labelA=mesLabel(compMesA);
   const labelB=mesLabel(compMesB);
-  return(<div style={{padding:"16px 16px 100px"}}>
+  return(<div style={{padding:"16px 16px 100px",minHeight:"100vh",overflowY:"auto"}}>
     <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>🔍 Comparar Meses</div>
     <div style={{fontSize:12,color:T.sub,marginBottom:16}}>Despesas reais por categoria</div>
     <div style={{display:"flex",gap:8,marginBottom:20}}>
@@ -990,7 +990,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
   const inp={width:"100%",padding:"12px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",boxShadow:"inset 0 1px 3px rgba(0,0,0,.04)",transition:"border-color .15s"};
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
   const sel={...inp,padding:"10px 14px"};
-  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"comparar",icon:"🔍",label:"Comparar"},{id:"chat",icon:"💬",label:"Finn IA"}];
+  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
 
   // Month picker options for dropdowns
   const monthOpts=[{val:"all",label:"Todos os meses"},...availableMonths.map(m=>{const[y,mo]=m.split("-").map(Number);return{val:m,label:MONTHS_PT[mo-1]+" "+y};})];
@@ -1100,6 +1100,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
       {page==="contas"&&<>
         <div style={{display:"flex",gap:6,marginBottom:16}}>
           <button onClick={()=>setPage("extrato")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+T.border,background:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:T.dark}}>📋 Extrato</button>
+          <button onClick={()=>setPage("comparar")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(page==="comparar"?T.accent:T.border),background:page==="comparar"?T.accentLt:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:page==="comparar"?T.accent:T.dark}}>🔍 Comparar</button>
           <button onClick={()=>setContasTab("contas")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="contas"?T.accent:T.border),background:contasTab==="contas"?T.accentLt:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="contas"?T.accent:T.dark}}>🏦 Contas</button>
           <button onClick={()=>setContasTab("budget")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="budget"?"#7c3aed":T.border),background:contasTab==="budget"?"#f3e8ff":T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="budget"?"#7c3aed":T.dark}}>🔮 Orçamento</button>
         </div>
