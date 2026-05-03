@@ -995,7 +995,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
   const inp={width:"100%",padding:"12px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",boxShadow:"inset 0 1px 3px rgba(0,0,0,.04)",transition:"border-color .15s"};
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
   const sel={...inp,padding:"10px 14px"};
-  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"comparar",icon:"🔍",label:"Comparar"},{id:"chat",icon:"💬",label:"Finn IA"}];
+  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
 
   // Month picker options for dropdowns
   const monthOpts=[{val:"all",label:"Todos os meses"},...availableMonths.map(m=>{const[y,mo]=m.split("-").map(Number);return{val:m,label:MONTHS_PT[mo-1]+" "+y};})];
@@ -1095,7 +1095,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
           </div>}
 
           <div style={card}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span><button onClick={()=>setPage("extrato")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver extrato</button></div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontWeight:700,fontSize:14}}>Últimas movimentações</span><div style={{display:"flex",gap:10}}><button onClick={()=>setPage("comparar")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>🔍 Comparar</button><button onClick={()=>setPage("extrato")} style={{background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:0}}>Ver extrato</button></div></div>
             {filteredTxs.length===0&&<div style={{textAlign:"center",padding:"20px 0",color:T.sub,fontSize:13}}>Nenhuma transação neste período.</div>}
             {filteredTxs.slice(0,6).map((t,i)=>(<div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i>0?"1px solid "+T.border:"none"}}><div style={{width:36,height:36,borderRadius:12,background:(CATS[t.cat]?.color||T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{CATS[t.cat]?.icon||"📦"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div><div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date} - {t.cat}{t.status==="pendente"?" · ⏳":""}</div></div><span style={{fontSize:14,fontWeight:700,color:t.cat==="Transferência"?"#94a3b8":t.cat==="Estorno/Crédito"?T.green:t.type==="in"?T.green:t.status==="pendente"?"#c2880a":T.red,fontFamily:M,flexShrink:0,opacity:t.status==="pendente"?0.8:1}}>{(t.type==="in"||t.cat==="Estorno/Crédito")?"+":"-"}{"R$"+Math.abs(Number(t.value)).toFixed(2)}</span></div>))}
           </div>
