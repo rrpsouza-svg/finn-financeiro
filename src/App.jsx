@@ -1360,8 +1360,8 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
 
     </div>
 
+    {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB}/>}
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
-      {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB}/>}
       {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:9,fontWeight:page===n.id?700:500,letterSpacing:.1}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
 
