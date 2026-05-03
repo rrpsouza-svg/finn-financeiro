@@ -1108,7 +1108,6 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
           <button onClick={()=>setPage("comparar")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(page==="comparar"?T.accent:T.border),background:page==="comparar"?T.accentLt:T.surface,fontFamily:F,fontSize:11,fontWeight:700,cursor:"pointer",color:page==="comparar"?T.accent:T.dark}}>🔍 Comparar</button>
           <button onClick={()=>setContasTab("contas")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="contas"?T.accent:T.border),background:contasTab==="contas"?T.accentLt:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="contas"?T.accent:T.dark}}>🏦 Contas</button>
           <button onClick={()=>setContasTab("budget")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="budget"?"#7c3aed":T.border),background:contasTab==="budget"?"#f3e8ff":T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="budget"?"#7c3aed":T.dark}}>🔮 Orçamento</button>
-          <button onClick={()=>setPage("comparar")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(page==="comparar"?T.accent:T.border),background:page==="comparar"?T.accentLt:T.surface,fontFamily:F,fontSize:11,fontWeight:700,cursor:"pointer",color:page==="comparar"?T.accent:T.dark}}>🔍 Comparar</button>
         </div>
         {contasTab==="contas"&&<AccountsPage accounts={accounts} setAccounts={setAccounts} txs={txs} setTxs={setTxs} saveTx={saveTx}/>}
         {contasTab==="budget"&&<BudgetPage budget={budget} setBudget={setBudget}/>}
@@ -1368,6 +1367,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
     </div>
 
     {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB} compModal={compModal} setCompModal={setCompModal}/>}
+    {page!=="comparar"&&<button onClick={()=>setPage("comparar")} style={{position:"fixed",bottom:68,right:"calc(50vw - 200px)",zIndex:21,background:T.accent,color:"#fff",border:"none",borderRadius:99,padding:"8px 14px",fontSize:12,fontWeight:700,fontFamily:F,cursor:"pointer",boxShadow:"0 4px 12px rgba(91,106,240,.4)",display:"flex",alignItems:"center",gap:5}}><span>🔍</span><span>Comparar</span></button>}
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
       {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:9,fontWeight:page===n.id?700:500,letterSpacing:.1}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
