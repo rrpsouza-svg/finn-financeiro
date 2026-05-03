@@ -369,7 +369,7 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
   const mesLabel=m=>{if(!m)return"—";const[y,mo]=m.split("-").map(Number);return(MONTHS_PT[mo-1]||m)+" "+y;};
   const labelA=mesLabel(compMesA);
   const labelB=mesLabel(compMesB);
-  return(<div style={{padding:"16px 16px 100px",minHeight:"100vh",overflowY:"auto"}}>
+  return(<div style={{padding:"16px 16px 100px"}}>
     <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>🔍 Comparar Meses</div>
     <div style={{fontSize:12,color:T.sub,marginBottom:16}}>Despesas reais por categoria</div>
     <div style={{display:"flex",gap:8,marginBottom:20}}>
@@ -999,7 +999,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
   if(!authReady)return<div style={{minHeight:"100vh",background:T.dark,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontFamily:F,fontSize:16}}>Carregando...</div>;
   if(!session)return<LoginScreen/>;
 
-  return(<div style={{fontFamily:F,background:T.bg,color:T.dark,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative",paddingBottom:76}}>
+  return(<div style={{fontFamily:F,background:T.bg,color:T.dark,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative",paddingBottom:80,WebkitOverflowScrolling:"touch"}}>
     {editTx&&<EditModal tx={editTx} onSave={updateTx} onClose={()=>setEditTx(null)} accounts={accounts}/>}
 
     <div style={{background:T.dark,padding:"14px 18px",position:"sticky",top:0,zIndex:10}}>
