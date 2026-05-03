@@ -990,7 +990,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
   const inp={width:"100%",padding:"12px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",boxShadow:"inset 0 1px 3px rgba(0,0,0,.04)",transition:"border-color .15s"};
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
   const sel={...inp,padding:"10px 14px"};
-  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
+  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"comparar",icon:"🔍",label:"Comparar"},{id:"chat",icon:"💬",label:"Finn IA"}];
 
   // Month picker options for dropdowns
   const monthOpts=[{val:"all",label:"Todos os meses"},...availableMonths.map(m=>{const[y,mo]=m.split("-").map(Number);return{val:m,label:MONTHS_PT[mo-1]+" "+y};})];
@@ -1100,7 +1100,6 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
       {page==="contas"&&<>
         <div style={{display:"flex",gap:6,marginBottom:16}}>
           <button onClick={()=>setPage("extrato")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+T.border,background:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:T.dark}}>📋 Extrato</button>
-          <button onClick={()=>setPage("comparar")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(page==="comparar"?T.accent:T.border),background:page==="comparar"?T.accentLt:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:page==="comparar"?T.accent:T.dark}}>🔍 Comparar</button>
           <button onClick={()=>setContasTab("contas")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="contas"?T.accent:T.border),background:contasTab==="contas"?T.accentLt:T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="contas"?T.accent:T.dark}}>🏦 Contas</button>
           <button onClick={()=>setContasTab("budget")} style={{flex:1,padding:"9px",borderRadius:10,border:"1.5px solid "+(contasTab==="budget"?"#7c3aed":T.border),background:contasTab==="budget"?"#f3e8ff":T.surface,fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",color:contasTab==="budget"?"#7c3aed":T.dark}}>🔮 Orçamento</button>
         </div>
@@ -1363,7 +1362,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
 
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
       {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB}/>}
-      {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:10,fontWeight:page===n.id?700:500,letterSpacing:.2}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
+      {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:9,fontWeight:page===n.id?700:500,letterSpacing:.1}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
 
     <style>{`
