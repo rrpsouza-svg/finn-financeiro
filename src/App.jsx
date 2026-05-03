@@ -348,30 +348,42 @@ function buildProjection(txs, budget, maxFutureMonths=12) {
 
 function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
   const TRANSF_CATS=["Transferência","Pgto Cartão"];
-  const allCats=Object.keys(CATS).filter(c=>!TRANSF_CATS.includes(c));
+  const INCOME_CATS_LIST=["Receita Raphael","Receita Julia","Outras Receitas"];
+  const EXPENSE_CATS_LIST=Object.keys(CATS).filter(c=>!TRANSF_CATS.includes(c)&&!INCOME_CATS_LIST.includes(c));
   const allMeses=[...new Set(txs.map(t=>(t.fatura_mes||t.date?.slice(0,7)||"")).filter(Boolean))].sort();
-  const getMesData=mes=>{
-    if(!mes)return {};
-    const mtxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes&&!TRANSF_CATS.includes(t.cat));
-    const out={};
-    allCats.forEach(cat=>{
-      const v=mtxs.filter(t=>t.cat===cat&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
-      if(v>0)out[cat]=v;
+  const getMesStats=mes=>{
+    if(!mes)return {recCats:{},despCats:{},totalRec:0,totalDesp:0};
+    const mtxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes&&!TRANSF_CATS.includes(t.cat)&&t.status!=="pendente");
+    const recCats={};
+    INCOME_CATS_LIST.forEach(cat=>{
+      const v=mtxs.filter(t=>t.cat===cat&&t.type==="in").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+      if(v>0)recCats[cat]=v;
     });
-    return out;
+    const despCats={};
+    EXPENSE_CATS_LIST.forEach(cat=>{
+      const v=mtxs.filter(t=>t.cat===cat&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+      if(v>0)despCats[cat]=v;
+    });
+    const totalRec=Object.values(recCats).reduce((a,v)=>a+v,0);
+    const totalDesp=Object.values(despCats).reduce((a,v)=>a+v,0);
+    return {recCats,despCats,totalRec,totalDesp};
   };
-  const dataA=getMesData(compMesA);
-  const dataB=getMesData(compMesB);
-  const catsUsed=allCats.filter(c=>(dataA[c]||0)>0||(dataB[c]||0)>0);
+  const statsA=getMesStats(compMesA);
+  const statsB=getMesStats(compMesB);
+  const recCatsUsed=INCOME_CATS_LIST.filter(c=>(statsA.recCats[c]||0)>0||(statsB.recCats[c]||0)>0);
+  const despCatsUsed=EXPENSE_CATS_LIST.filter(c=>(statsA.despCats[c]||0)>0||(statsB.despCats[c]||0)>0);
   const fmt=n=>n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const totalA=Object.values(dataA).reduce((a,v)=>a+v,0);
-  const totalB=Object.values(dataB).reduce((a,v)=>a+v,0);
   const mesLabel=m=>{if(!m)return"—";const[y,mo]=m.split("-").map(Number);return(MONTHS_PT[mo-1]||m)+" "+y;};
   const labelA=mesLabel(compMesA);
   const labelB=mesLabel(compMesB);
+  const saldoA=statsA.totalRec-statsA.totalDesp;
+  const saldoB=statsB.totalRec-statsB.totalDesp;
+  const CatRow=({cat,a,b,i,bgA,bgB})=>{const diff=b-a;const diffColor=diff>0?T.red:diff<0?"#16a34a":T.sub;const diffLabel=diff===0?"igual":(diff>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(diff));return(<div style={{borderTop:"1px solid "+T.border,background:i%2===0?"#fff":T.surface,padding:"10px 12px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:15}}>{CATS[cat]?.icon||"📦"}</span><span style={{fontSize:12,fontWeight:600,color:T.dark}}>{cat}</span></div><span style={{fontSize:11,fontWeight:700,color:diffColor,background:diff===0?"#f1f5f9":diff>0?"#fef2f2":"#f0fdf4",padding:"2px 8px",borderRadius:99}}>{diffLabel}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}><div style={{background:bgA||T.accentLt,borderRadius:8,padding:"6px 10px",textAlign:"center"}}><div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div><div style={{fontSize:13,fontFamily:M,fontWeight:700,color:a>0?T.dark:T.sub}}>{a>0?"R$ "+fmt(a):"—"}</div></div><div style={{background:bgB||"#fffbeb",borderRadius:8,padding:"6px 10px",textAlign:"center"}}><div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div><div style={{fontSize:13,fontFamily:M,fontWeight:700,color:b>0?T.dark:T.sub}}>{b>0?"R$ "+fmt(b):"—"}</div></div></div></div>);};
+  const TotalRow=({label,totalA,totalB,greenIfDown=true})=>{const diff=totalB-totalA;const pos=greenIfDown?T.red:"#16a34a";const neg=greenIfDown?"#16a34a":T.red;const diffColor=diff>0?pos:diff<0?neg:T.sub;return(<div style={{borderTop:"2px solid "+T.border,background:T.accentLt,padding:"12px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:13,fontWeight:800,color:T.dark}}>{label}</span><span style={{fontSize:12,fontWeight:700,color:diffColor,background:diff>0?(greenIfDown?"#fef2f2":"#f0fdf4"):diff<0?(greenIfDown?"#f0fdf4":"#fef2f2"):"#f1f5f9",padding:"3px 10px",borderRadius:99}}>{diff===0?"igual":(diff>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(diff))}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}><div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1.5px solid "+T.accent}}><div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div><div style={{fontSize:14,fontFamily:M,fontWeight:800,color:T.accent}}>R$ {fmt(totalA)}</div></div><div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1.5px solid #f59e0b"}}><div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div><div style={{fontSize:14,fontFamily:M,fontWeight:800,color:"#b45309"}}>R$ {fmt(totalB)}</div></div></div></div>);};
+  const SectionHeader=({icon,title})=>(<div style={{background:"#f8f9ff",padding:"8px 12px",borderTop:"1px solid "+T.border}}><span style={{fontSize:11,fontWeight:800,color:T.sub,letterSpacing:.8}}>{icon} {title}</span></div>);
   return(<div style={{padding:"16px 16px 100px"}}>
     <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>🔍 Comparar Meses</div>
-    <div style={{fontSize:12,color:T.sub,marginBottom:16}}>Despesas reais por categoria</div>
+    <div style={{fontSize:12,color:T.sub,marginBottom:16}}>Receitas, despesas e saldo por categoria</div>
     <div style={{display:"flex",gap:8,marginBottom:20}}>
       <div style={{flex:1}}>
         <div style={{fontSize:11,fontWeight:600,color:T.sub,marginBottom:4}}>MÊS A</div>
@@ -388,57 +400,25 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
         </select>
       </div>
     </div>
-    {compMesA&&compMesB&&(<div style={{background:T.surface,borderRadius:14,border:"1px solid "+T.border,overflow:"hidden"}}>
-      {/* Header */}
-      <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",background:T.accentLt,padding:"10px 12px",gap:8,alignItems:"center"}}>
-        <div style={{fontSize:11,fontWeight:700,color:T.sub,minWidth:90}}>CATEGORIA</div>
-        <div style={{fontSize:11,fontWeight:700,color:T.accent,textAlign:"right"}}>{labelA}</div>
-        <div style={{fontSize:11,fontWeight:700,color:"#b45309",textAlign:"right"}}>{labelB}</div>
-      </div>
-      {/* Rows */}
-      {catsUsed.map((cat,i)=>{
-        const a=dataA[cat]||0;const b=dataB[cat]||0;const diff=b-a;
-        const diffColor=diff>0?T.red:diff<0?"#16a34a":T.sub;
-        const diffLabel=diff===0?"igual":(diff>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(diff));
-        return(<div key={cat} style={{borderTop:"1px solid "+T.border,background:i%2===0?"#fff":T.surface,padding:"10px 12px"}}>
-          {/* Cat name + diff badge */}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <span style={{fontSize:15}}>{CATS[cat]?.icon||"📦"}</span>
-              <span style={{fontSize:12,fontWeight:600,color:T.dark}}>{cat}</span>
-            </div>
-            <span style={{fontSize:11,fontWeight:700,color:diffColor,background:diff===0?"#f1f5f9":diff>0?"#fef2f2":"#f0fdf4",padding:"2px 8px",borderRadius:99}}>{diffLabel}</span>
-          </div>
-          {/* Values row */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-            <div style={{background:T.accentLt,borderRadius:8,padding:"6px 10px",textAlign:"center"}}>
-              <div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div>
-              <div style={{fontSize:13,fontFamily:M,fontWeight:700,color:a>0?T.dark:T.sub}}>{a>0?"R$ "+fmt(a):"—"}</div>
-            </div>
-            <div style={{background:"#fffbeb",borderRadius:8,padding:"6px 10px",textAlign:"center"}}>
-              <div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div>
-              <div style={{fontSize:13,fontFamily:M,fontWeight:700,color:b>0?T.dark:T.sub}}>{b>0?"R$ "+fmt(b):"—"}</div>
-            </div>
-          </div>
-        </div>);
-      })}
-      {/* Total */}
-      <div style={{borderTop:"2px solid "+T.border,background:T.accentLt,padding:"12px"}}>
+    {compMesA&&compMesB&&(<div style={{background:T.surface,borderRadius:14,border:"1px solid "+T.border,overflow:"hidden",marginBottom:16}}>
+      {/* RECEITAS */}
+      <SectionHeader icon="💰" title="RECEITAS"/>
+      {recCatsUsed.length===0&&<div style={{padding:"12px",fontSize:12,color:T.sub,textAlign:"center"}}>Sem receitas nos meses selecionados</div>}
+      {recCatsUsed.map((cat,i)=><CatRow key={cat} cat={cat} a={statsA.recCats[cat]||0} b={statsB.recCats[cat]||0} i={i}/>)}
+      <TotalRow label="TOTAL RECEITAS" totalA={statsA.totalRec} totalB={statsB.totalRec} greenIfDown={false}/>
+      {/* DESPESAS */}
+      <SectionHeader icon="💸" title="DESPESAS"/>
+      {despCatsUsed.map((cat,i)=><CatRow key={cat} cat={cat} a={statsA.despCats[cat]||0} b={statsB.despCats[cat]||0} i={i}/>)}
+      <TotalRow label="TOTAL DESPESAS" totalA={statsA.totalDesp} totalB={statsB.totalDesp} greenIfDown={true}/>
+      {/* SALDO */}
+      <div style={{borderTop:"2px solid "+T.border,background:saldoA>=0&&saldoB>=0?"#f0fdf4":saldoA<0&&saldoB<0?"#fef2f2":"#f8f9ff",padding:"14px 12px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <span style={{fontSize:13,fontWeight:800,color:T.dark}}>TOTAL</span>
-          <span style={{fontSize:12,fontWeight:700,color:(totalB-totalA)>0?T.red:(totalB-totalA)<0?"#16a34a":T.sub,background:(totalB-totalA)>0?"#fef2f2":(totalB-totalA)<0?"#f0fdf4":"#f1f5f9",padding:"3px 10px",borderRadius:99}}>
-            {(totalB-totalA)===0?"igual":((totalB-totalA)>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(totalB-totalA))}
-          </span>
+          <span style={{fontSize:14,fontWeight:800,color:T.dark}}>💼 SALDO DO MÊS</span>
+          <span style={{fontSize:12,fontWeight:700,color:(saldoB-saldoA)>=0?"#16a34a":T.red,background:(saldoB-saldoA)>=0?"#f0fdf4":"#fef2f2",padding:"3px 10px",borderRadius:99}}>{(saldoB-saldoA)===0?"igual":((saldoB-saldoA)>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(saldoB-saldoA))}</span>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-          <div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1.5px solid "+T.accent}}>
-            <div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div>
-            <div style={{fontSize:14,fontFamily:M,fontWeight:800,color:T.accent}}>R$ {fmt(totalA)}</div>
-          </div>
-          <div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1.5px solid #f59e0b"}}>
-            <div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div>
-            <div style={{fontSize:14,fontFamily:M,fontWeight:800,color:"#b45309"}}>R$ {fmt(totalB)}</div>
-          </div>
+          <div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"2px solid "+(saldoA>=0?"#16a34a":T.red)}}><div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div><div style={{fontSize:15,fontFamily:M,fontWeight:800,color:saldoA>=0?"#16a34a":T.red}}>{saldoA>=0?"":"- "}R$ {fmt(Math.abs(saldoA))}</div></div>
+          <div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"2px solid "+(saldoB>=0?"#16a34a":T.red)}}><div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div><div style={{fontSize:15,fontFamily:M,fontWeight:800,color:saldoB>=0?"#16a34a":T.red}}>{saldoB>=0?"":"- "}R$ {fmt(Math.abs(saldoB))}</div></div>
         </div>
       </div>
     </div>)}
