@@ -346,14 +346,14 @@ function buildProjection(txs, budget, maxFutureMonths=12) {
   });
 }
 
-function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
+function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,setCompModal}) {
   const TRANSF_CATS=["Transferência","Pgto Cartão"];
   const INCOME_CATS_LIST=["Receita Raphael","Receita Julia","Outras Receitas"];
   const EXPENSE_CATS_LIST=Object.keys(CATS).filter(c=>!TRANSF_CATS.includes(c)&&!INCOME_CATS_LIST.includes(c));
   const allMeses=[...new Set(txs.map(t=>(t.fatura_mes||t.date?.slice(0,7)||"")).filter(Boolean))].sort();
   const getMesStats=mes=>{
     if(!mes)return {recCats:{},despCats:{},totalRec:0,totalDesp:0};
-    const mtxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes&&!TRANSF_CATS.includes(t.cat)&&t.status!=="pendente");
+    const mtxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes&&!TRANSF_CATS.includes(t.cat));
     const recCats={};
     INCOME_CATS_LIST.forEach(cat=>{
       const v=mtxs.filter(t=>t.cat===cat&&t.type==="in").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
@@ -378,7 +378,7 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
   const labelB=mesLabel(compMesB);
   const saldoA=statsA.totalRec-statsA.totalDesp;
   const saldoB=statsB.totalRec-statsB.totalDesp;
-  const CatRow=({cat,a,b,i,bgA,bgB})=>{const diff=b-a;const diffColor=diff>0?T.red:diff<0?"#16a34a":T.sub;const diffLabel=diff===0?"igual":(diff>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(diff));return(<div style={{borderTop:"1px solid "+T.border,background:i%2===0?"#fff":T.surface,padding:"10px 12px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:15}}>{CATS[cat]?.icon||"📦"}</span><span style={{fontSize:12,fontWeight:600,color:T.dark}}>{cat}</span></div><span style={{fontSize:11,fontWeight:700,color:diffColor,background:diff===0?"#f1f5f9":diff>0?"#fef2f2":"#f0fdf4",padding:"2px 8px",borderRadius:99}}>{diffLabel}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}><div style={{background:bgA||T.accentLt,borderRadius:8,padding:"6px 10px",textAlign:"center"}}><div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div><div style={{fontSize:13,fontFamily:M,fontWeight:700,color:a>0?T.dark:T.sub}}>{a>0?"R$ "+fmt(a):"—"}</div></div><div style={{background:bgB||"#fffbeb",borderRadius:8,padding:"6px 10px",textAlign:"center"}}><div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div><div style={{fontSize:13,fontFamily:M,fontWeight:700,color:b>0?T.dark:T.sub}}>{b>0?"R$ "+fmt(b):"—"}</div></div></div></div>);};
+  const CatRow=({cat,a,b,i,mesA,mesB})=>{const diff=b-a;const diffColor=diff>0?T.red:diff<0?"#16a34a":T.sub;const diffLabel=diff===0?"igual":(diff>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(diff));return(<div style={{borderTop:"1px solid "+T.border,background:i%2===0?"#fff":T.surface,padding:"10px 12px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:15}}>{CATS[cat]?.icon||"📦"}</span><span style={{fontSize:12,fontWeight:600,color:T.dark}}>{cat}</span></div><span style={{fontSize:11,fontWeight:700,color:diffColor,background:diff===0?"#f1f5f9":diff>0?"#fef2f2":"#f0fdf4",padding:"2px 8px",borderRadius:99}}>{diffLabel}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}><div onClick={()=>a>0&&setCompModal({cat,mes:mesA,label:labelA})} style={{background:T.accentLt,borderRadius:8,padding:"6px 10px",textAlign:"center",cursor:a>0?"pointer":"default",border:a>0?"1px solid transparent":"none",transition:"border .15s"}} onMouseEnter={e=>{if(a>0)e.currentTarget.style.border="1px solid "+T.accent}} onMouseLeave={e=>e.currentTarget.style.border="1px solid transparent"}><div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div><div style={{fontSize:13,fontFamily:M,fontWeight:700,color:a>0?T.dark:T.sub}}>{a>0?"R$ "+fmt(a)+" 🔍":"—"}</div></div><div onClick={()=>b>0&&setCompModal({cat,mes:mesB,label:labelB})} style={{background:"#fffbeb",borderRadius:8,padding:"6px 10px",textAlign:"center",cursor:b>0?"pointer":"default",border:b>0?"1px solid transparent":"none",transition:"border .15s"}} onMouseEnter={e=>{if(b>0)e.currentTarget.style.border="1px solid #f59e0b"}} onMouseLeave={e=>e.currentTarget.style.border="1px solid transparent"}><div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div><div style={{fontSize:13,fontFamily:M,fontWeight:700,color:b>0?T.dark:T.sub}}>{b>0?"R$ "+fmt(b)+" 🔍":"—"}</div></div></div></div>);};
   const TotalRow=({label,totalA,totalB,greenIfDown=true})=>{const diff=totalB-totalA;const pos=greenIfDown?T.red:"#16a34a";const neg=greenIfDown?"#16a34a":T.red;const diffColor=diff>0?pos:diff<0?neg:T.sub;return(<div style={{borderTop:"2px solid "+T.border,background:T.accentLt,padding:"12px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:13,fontWeight:800,color:T.dark}}>{label}</span><span style={{fontSize:12,fontWeight:700,color:diffColor,background:diff>0?(greenIfDown?"#fef2f2":"#f0fdf4"):diff<0?(greenIfDown?"#f0fdf4":"#fef2f2"):"#f1f5f9",padding:"3px 10px",borderRadius:99}}>{diff===0?"igual":(diff>0?"▲ R$ ":"▼ R$ ")+fmt(Math.abs(diff))}</span></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}><div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1.5px solid "+T.accent}}><div style={{fontSize:9,color:T.accent,fontWeight:700,marginBottom:2}}>{labelA}</div><div style={{fontSize:14,fontFamily:M,fontWeight:800,color:T.accent}}>R$ {fmt(totalA)}</div></div><div style={{background:"#fff",borderRadius:8,padding:"8px 10px",textAlign:"center",border:"1.5px solid #f59e0b"}}><div style={{fontSize:9,color:"#b45309",fontWeight:700,marginBottom:2}}>{labelB}</div><div style={{fontSize:14,fontFamily:M,fontWeight:800,color:"#b45309"}}>R$ {fmt(totalB)}</div></div></div></div>);};
   const SectionHeader=({icon,title})=>(<div style={{background:"#f8f9ff",padding:"8px 12px",borderTop:"1px solid "+T.border}}><span style={{fontSize:11,fontWeight:800,color:T.sub,letterSpacing:.8}}>{icon} {title}</span></div>);
   return(<div style={{padding:"16px 16px 100px"}}>
@@ -404,11 +404,11 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
       {/* RECEITAS */}
       <SectionHeader icon="💰" title="RECEITAS"/>
       {recCatsUsed.length===0&&<div style={{padding:"12px",fontSize:12,color:T.sub,textAlign:"center"}}>Sem receitas nos meses selecionados</div>}
-      {recCatsUsed.map((cat,i)=><CatRow key={cat} cat={cat} a={statsA.recCats[cat]||0} b={statsB.recCats[cat]||0} i={i}/>)}
+      {recCatsUsed.map((cat,i)=><CatRow key={cat} cat={cat} a={statsA.recCats[cat]||0} b={statsB.recCats[cat]||0} i={i} mesA={compMesA} mesB={compMesB}/>)}
       <TotalRow label="TOTAL RECEITAS" totalA={statsA.totalRec} totalB={statsB.totalRec} greenIfDown={false}/>
       {/* DESPESAS */}
       <SectionHeader icon="💸" title="DESPESAS"/>
-      {despCatsUsed.map((cat,i)=><CatRow key={cat} cat={cat} a={statsA.despCats[cat]||0} b={statsB.despCats[cat]||0} i={i}/>)}
+      {despCatsUsed.map((cat,i)=><CatRow key={cat} cat={cat} a={statsA.despCats[cat]||0} b={statsB.despCats[cat]||0} i={i} mesA={compMesA} mesB={compMesB}/>)}
       <TotalRow label="TOTAL DESPESAS" totalA={statsA.totalDesp} totalB={statsB.totalDesp} greenIfDown={true}/>
       {/* SALDO */}
       <div style={{borderTop:"2px solid "+T.border,background:saldoA>=0&&saldoB>=0?"#f0fdf4":saldoA<0&&saldoB<0?"#fef2f2":"#f8f9ff",padding:"14px 12px"}}>
@@ -423,6 +423,31 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB}) {
       </div>
     </div>)}
     {(!compMesA||!compMesB)&&<div style={{textAlign:"center",color:T.sub,fontSize:13,marginTop:40}}>Selecione os dois meses para comparar 👆</div>}
+    {compModal&&(()=>{
+      const TRANSF_CATS=["Transferência","Pgto Cartão"];
+      const modalTxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===compModal.mes&&t.cat===compModal.cat&&!TRANSF_CATS.includes(t.cat)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+      const fmt2=n=>Math.abs(Number(n)).toLocaleString("pt-BR",{minimumFractionDigits:2});
+      return(<div onClick={()=>setCompModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+        <div onClick={e=>e.stopPropagation()} style={{background:T.surface,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"75vh",display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"16px 16px 12px",borderBottom:"1px solid "+T.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+            <div><div style={{fontWeight:800,fontSize:15}}>{CATS[compModal.cat]?.icon} {compModal.cat}</div><div style={{fontSize:11,color:T.sub,marginTop:2}}>{compModal.label} · {modalTxs.length} lançamentos</div></div>
+            <button onClick={()=>setCompModal(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub,lineHeight:1}}>×</button>
+          </div>
+          <div style={{overflowY:"auto",flex:1,padding:"8px 0"}}>
+            {modalTxs.length===0&&<div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Nenhum lançamento encontrado</div>}
+            {modalTxs.map((t,i)=>(
+              <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderTop:i>0?"1px solid "+T.border:"none"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
+                  <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date}{t.parcela_atual?` · ${t.parcela_atual}/${t.total_parcelas}`:""}</div>
+                </div>
+                <span style={{fontSize:14,fontWeight:700,fontFamily:M,flexShrink:0,color:t.type==="in"?T.green:T.red}}>{t.type==="in"?"+":"-"}R$ {fmt2(t.value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>);
+    })()}
   </div>);
 }
 
@@ -763,7 +788,7 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
 export default function App() {
   const [session,setSession]=useState(null);const [authReady,setAuthReady]=useState(false);
   const [txs,setTxs]=useState([]);const [accounts,setAccounts]=useState([]);const [loadingTxs,setLoadingTxs]=useState(false);
-  const [page,setPage]=useState("home");const [editTx,setEditTx]=useState(null);const [compMesA,setCompMesA]=useState("");const [compMesB,setCompMesB]=useState("");
+  const [page,setPage]=useState("home");const [editTx,setEditTx]=useState(null);const [compMesA,setCompMesA]=useState("");const [compMesB,setCompMesB]=useState("");const [compModal,setCompModal]=useState(null);
   const now=new Date();
   const [selMonth,setSelMonth]=useState(now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0"));
   const [goals,setGoals]=useState(()=>{try{return JSON.parse(localStorage.getItem("finn_goals")||"{}")||DEFAULT_GOALS;}catch{return DEFAULT_GOALS;}});
@@ -1340,7 +1365,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
 
     </div>
 
-    {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB}/>}
+    {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB} compModal={compModal} setCompModal={setCompModal}/>}
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
       {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:9,fontWeight:page===n.id?700:500,letterSpacing:.1}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
