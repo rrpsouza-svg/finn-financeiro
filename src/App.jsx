@@ -683,7 +683,7 @@ function AccountsPage({accounts,setAccounts,txs,setTxs,saveTx}) {
 export default function App() {
   const [session,setSession]=useState(null);const [authReady,setAuthReady]=useState(false);
   const [txs,setTxs]=useState([]);const [accounts,setAccounts]=useState([]);const [loadingTxs,setLoadingTxs]=useState(false);
-  const [page,setPage]=useState("home");const [editTx,setEditTx]=useState(null);
+  const [page,setPage]=useState("home");const [editTx,setEditTx]=useState(null);const [compMesA,setCompMesA]=useState("");const [compMesB,setCompMesB]=useState("");
   const now=new Date();
   const [selMonth,setSelMonth]=useState(now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0"));
   const [goals,setGoals]=useState(()=>{try{return JSON.parse(localStorage.getItem("finn_goals")||"{}")||DEFAULT_GOALS;}catch{return DEFAULT_GOALS;}});
@@ -890,7 +890,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
   const inp={width:"100%",padding:"12px 14px",border:"2px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:15,outline:"none",boxSizing:"border-box",color:T.dark,background:"#fff",boxShadow:"inset 0 1px 3px rgba(0,0,0,.04)",transition:"border-color .15s"};
   const lbl={fontSize:11,fontWeight:700,color:T.sub,display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:.6};
   const sel={...inp,padding:"10px 14px"};
-  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"chat",icon:"💬",label:"Finn IA"}];
+  const NAV=[{id:"home",icon:"📊",label:"Início"},{id:"contas",icon:"🏦",label:"Contas"},{id:"add",icon:"✏️",label:"Lançar"},{id:"import",icon:"📂",label:"Importar"},{id:"comparar",icon:"🔍",label:"Comparar"},{id:"chat",icon:"💬",label:"Finn IA"}];
 
   // Month picker options for dropdowns
   const monthOpts=[{val:"all",label:"Todos os meses"},...availableMonths.map(m=>{const[y,mo]=m.split("-").map(Number);return{val:m,label:MONTHS_PT[mo-1]+" "+y};})];
@@ -1261,6 +1261,74 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
     </div>
 
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
+      {page==="comparar"&&(()=>{
+        const TRANSF_CATS=["Transferência","Pgto Cartão"];
+        const allCats=Object.keys(CATS).filter(c=>!TRANSF_CATS.includes(c));
+        const allMeses=[...new Set(txs.map(t=>(t.fatura_mes||t.date?.slice(0,7)||"")).filter(Boolean))].sort();
+        const mesAOpts=allMeses;
+        const mesBOpts=allMeses;
+        const getMesData=(mes)=>{
+          if(!mes)return {};
+          const mtxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===mes&&!TRANSF_CATS.includes(t.cat));
+          const out={};
+          allCats.forEach(cat=>{
+            const v=mtxs.filter(t=>t.cat===cat&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+            if(v>0)out[cat]=v;
+          });
+          return out;
+        };
+        const dataA=getMesData(compMesA);
+        const dataB=getMesData(compMesB);
+        const catsUsed=allCats.filter(c=>(dataA[c]||0)>0||(dataB[c]||0)>0);
+        const fmt=n=>n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+        const totalA=Object.values(dataA).reduce((a,v)=>a+v,0);
+        const totalB=Object.values(dataB).reduce((a,v)=>a+v,0);
+        const mesLabel=m=>{if(!m)return"—";const[y,mo]=m.split("-").map(Number);return(MONTHS_PT[mo-1]||m)+" "+y;};
+        return(<div style={{padding:"16px 16px 100px"}}>
+          <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>🔍 Comparar Meses</div>
+          <div style={{fontSize:12,color:T.sub,marginBottom:16}}>Despesas reais por categoria</div>
+          <div style={{display:"flex",gap:8,marginBottom:20}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,fontWeight:600,color:T.sub,marginBottom:4}}>MÊS A</div>
+              <select value={compMesA} onChange={e=>setCompMesA(e.target.value)} style={{width:"100%",padding:"9px 10px",border:"2px solid "+T.accent,borderRadius:10,fontFamily:F,fontSize:13,fontWeight:600,color:T.accent,outline:"none",background:"#fff"}}>
+                <option value="">Selecione...</option>
+                {mesAOpts.map(m=><option key={m} value={m}>{mesLabel(m)}</option>)}
+              </select>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,fontWeight:600,color:T.sub,marginBottom:4}}>MÊS B</div>
+              <select value={compMesB} onChange={e=>setCompMesB(e.target.value)} style={{width:"100%",padding:"9px 10px",border:"2px solid #f59e0b",borderRadius:10,fontFamily:F,fontSize:13,fontWeight:600,color:"#b45309",outline:"none",background:"#fff"}}>
+                <option value="">Selecione...</option>
+                {mesBOpts.map(m=><option key={m} value={m}>{mesLabel(m)}</option>)}
+              </select>
+            </div>
+          </div>
+          {compMesA&&compMesB&&(<div style={{background:T.surface,borderRadius:14,border:"1px solid "+T.border,overflow:"hidden"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 90px",background:T.accentLt,padding:"10px 12px",gap:8}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.sub}}>CATEGORIA</div>
+              <div style={{fontSize:11,fontWeight:700,color:T.accent,textAlign:"right"}}>{mesLabel(compMesA)}</div>
+              <div style={{fontSize:11,fontWeight:700,color:"#b45309",textAlign:"right"}}>{mesLabel(compMesB)}</div>
+              <div style={{fontSize:11,fontWeight:700,color:T.sub,textAlign:"right"}}>DIFERENÇA</div>
+            </div>
+            {catsUsed.map((cat,i)=>{
+              const a=dataA[cat]||0;const b=dataB[cat]||0;const diff=b-a;
+              return(<div key={cat} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 90px",padding:"10px 12px",gap:8,borderTop:"1px solid "+T.border,background:i%2===0?"#fff":T.surface}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.dark,display:"flex",alignItems:"center",gap:4}}><span>{CATS[cat]?.icon||"📦"}</span><span style={{fontSize:11}}>{cat}</span></div>
+                <div style={{fontSize:12,fontFamily:M,textAlign:"right",color:a>0?T.dark:T.sub}}>{a>0?"R$ "+fmt(a):"—"}</div>
+                <div style={{fontSize:12,fontFamily:M,textAlign:"right",color:b>0?T.dark:T.sub}}>{b>0?"R$ "+fmt(b):"—"}</div>
+                <div style={{fontSize:12,fontFamily:M,textAlign:"right",fontWeight:700,color:diff>0?T.red:diff<0?"#16a34a":T.sub}}>{diff===0?"=":(diff>0?"+":"")+fmt(diff)}</div>
+              </div>);
+            })}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 90px",padding:"12px",gap:8,borderTop:"2px solid "+T.border,background:T.accentLt}}>
+              <div style={{fontSize:12,fontWeight:800,color:T.dark}}>TOTAL</div>
+              <div style={{fontSize:13,fontFamily:M,textAlign:"right",fontWeight:700,color:T.accent}}>R$ {fmt(totalA)}</div>
+              <div style={{fontSize:13,fontFamily:M,textAlign:"right",fontWeight:700,color:"#b45309"}}>R$ {fmt(totalB)}</div>
+              <div style={{fontSize:13,fontFamily:M,textAlign:"right",fontWeight:700,color:(totalB-totalA)>0?T.red:(totalB-totalA)<0?"#16a34a":T.sub}}>{totalB-totalA===0?"=":((totalB-totalA)>0?"+":"")+fmt(totalB-totalA)}</div>
+            </div>
+          </div>)}
+          {(!compMesA||!compMesB)&&<div style={{textAlign:"center",color:T.sub,fontSize:13,marginTop:40}}>Selecione os dois meses para comparar</div>}
+        </div>);
+      })()}
       {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:10,fontWeight:page===n.id?700:500,letterSpacing:.2}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
 
