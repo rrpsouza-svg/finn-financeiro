@@ -346,7 +346,7 @@ function buildProjection(txs, budget, maxFutureMonths=12) {
   });
 }
 
-function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,setCompModal}) {
+function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,setCompModal,setEditTx}) {
   const TRANSF_CATS=["Transferência","Pgto Cartão"];
   const INCOME_CATS_LIST=["Receita Raphael","Receita Julia","Outras Receitas"];
   const EXPENSE_CATS_LIST=Object.keys(CATS).filter(c=>!TRANSF_CATS.includes(c)&&!INCOME_CATS_LIST.includes(c));
@@ -436,12 +436,13 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,s
           <div style={{overflowY:"auto",flex:1,padding:"8px 0"}}>
             {modalTxs.length===0&&<div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Nenhum lançamento encontrado</div>}
             {modalTxs.map((t,i)=>(
-              <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderTop:i>0?"1px solid "+T.border:"none"}}>
+              <div key={t.id} onClick={()=>{setEditTx(t);setCompModal(null);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderTop:i>0?"1px solid "+T.border:"none",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=T.surface} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
                   <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date}{t.parcela_atual?` · ${t.parcela_atual}/${t.total_parcelas}`:""}</div>
                 </div>
                 <span style={{fontSize:14,fontWeight:700,fontFamily:M,flexShrink:0,color:t.type==="in"?T.green:T.red}}>{t.type==="in"?"+":"-"}R$ {fmt2(t.value)}</span>
+                <span style={{fontSize:13,color:T.sub,flexShrink:0}}>✏️</span>
               </div>
             ))}
           </div>
@@ -1366,7 +1367,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
 
     </div>
 
-    {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB} compModal={compModal} setCompModal={setCompModal}/>}
+    {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB} compModal={compModal} setCompModal={setCompModal} setEditTx={setEditTx}/>}
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
       {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:9,fontWeight:page===n.id?700:500,letterSpacing:.1}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
