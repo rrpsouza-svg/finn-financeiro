@@ -346,7 +346,7 @@ function buildProjection(txs, budget, maxFutureMonths=12) {
   });
 }
 
-function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,setCompModal,setEditTx}) {
+function CompararPage({txs,setTxs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,setCompModal,setEditTx}) {
   const TRANSF_CATS=["Transferência","Pgto Cartão"];
   const INCOME_CATS_LIST=["Receita Raphael","Receita Julia","Outras Receitas"];
   const EXPENSE_CATS_LIST=Object.keys(CATS).filter(c=>!TRANSF_CATS.includes(c)&&!INCOME_CATS_LIST.includes(c));
@@ -423,32 +423,78 @@ function CompararPage({txs,compMesA,setCompMesA,compMesB,setCompMesB,compModal,s
       </div>
     </div>)}
     {(!compMesA||!compMesB)&&<div style={{textAlign:"center",color:T.sub,fontSize:13,marginTop:40}}>Selecione os dois meses para comparar 👆</div>}
-    {compModal&&(()=>{
-      const TRANSF_CATS=["Transferência","Pgto Cartão"];
-      const modalTxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===compModal.mes&&t.cat===compModal.cat&&!TRANSF_CATS.includes(t.cat)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-      const fmt2=n=>Math.abs(Number(n)).toLocaleString("pt-BR",{minimumFractionDigits:2});
-      return(<div onClick={()=>setCompModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-        <div onClick={e=>e.stopPropagation()} style={{background:T.surface,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"75vh",display:"flex",flexDirection:"column"}}>
-          <div style={{padding:"16px 16px 12px",borderBottom:"1px solid "+T.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-            <div><div style={{fontWeight:800,fontSize:15}}>{CATS[compModal.cat]?.icon} {compModal.cat}</div><div style={{fontSize:11,color:T.sub,marginTop:2}}>{compModal.label} · {modalTxs.length} lançamentos</div></div>
-            <button onClick={()=>setCompModal(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub,lineHeight:1}}>×</button>
-          </div>
-          <div style={{overflowY:"auto",flex:1,padding:"8px 0"}}>
-            {modalTxs.length===0&&<div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Nenhum lançamento encontrado</div>}
-            {modalTxs.map((t,i)=>(
-              <div key={t.id} onClick={()=>{setEditTx(t);setCompModal(null);}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderTop:i>0?"1px solid "+T.border:"none",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=T.surface} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
-                  <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date}{t.parcela_atual?` · ${t.parcela_atual}/${t.total_parcelas}`:""}</div>
-                </div>
-                <span style={{fontSize:14,fontWeight:700,fontFamily:M,flexShrink:0,color:t.type==="in"?T.green:T.red}}>{t.type==="in"?"+":"-"}R$ {fmt2(t.value)}</span>
-                <span style={{fontSize:13,color:T.sub,flexShrink:0}}>✏️</span>
+    {compModal&&<DetailModal compModal={compModal} setCompModal={setCompModal} txs={txs} setTxs={setTxs} setEditTx={setEditTx}/>}
+  </div>);
+}
+
+function DetailModal({compModal,setCompModal,txs,setTxs,setEditTx}) {
+  const TRANSF_CATS=["Transferência","Pgto Cartão"];
+  const modalTxs=txs.filter(t=>(t.fatura_mes||t.date?.slice(0,7))===compModal.mes&&t.cat===compModal.cat&&!TRANSF_CATS.includes(t.cat)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const fmt2=n=>Math.abs(Number(n)).toLocaleString("pt-BR",{minimumFractionDigits:2});
+  const [selected,setSelected]=useState({});
+  const [bulkCat,setBulkCat]=useState("");
+  const [bulkSaving,setBulkSaving]=useState(false);
+  const selIds=Object.keys(selected).filter(id=>selected[id]);
+  const allCats=Object.keys(CATS).filter(c=>c!==compModal.cat);
+  const toggleSel=id=>setSelected(p=>({...p,[id]:!p[id]}));
+  const toggleAll=()=>{if(selIds.length===modalTxs.length){setSelected({});}else{const all={};modalTxs.forEach(t=>all[t.id]=true);setSelected(all);}};
+  const applyBulkCat=async()=>{
+    if(!bulkCat||selIds.length===0)return;
+    setBulkSaving(true);
+    const isIncomeCat=INCOME_CATS.includes(bulkCat);
+    const isNeutralCat=["Transferência","Pgto Cartão","Estorno/Crédito"].includes(bulkCat);
+    for(const id of selIds){
+      const tx=modalTxs.find(t=>t.id===id);
+      if(!tx)continue;
+      const newType=isIncomeCat?"in":(isNeutralCat?tx.type:"out");
+      const newValue=newType==="in"?Math.abs(Number(tx.value)):-Math.abs(Number(tx.value));
+      await supabase.from("transactions").update({cat:bulkCat,type:newType,value:newValue}).eq("id",id);
+    }
+    const{data}=await supabase.from("transactions").select("*").order("date",{ascending:false});
+    if(data)setTxs(data);
+    setSelected({});setBulkCat("");setBulkSaving(false);
+  };
+  return(<div onClick={()=>setCompModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:T.surface,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"80vh",display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"16px 16px 12px",borderBottom:"1px solid "+T.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+        <div><div style={{fontWeight:800,fontSize:15}}>{CATS[compModal.cat]?.icon} {compModal.cat}</div><div style={{fontSize:11,color:T.sub,marginTop:2}}>{compModal.label} · {modalTxs.length} lançamentos</div></div>
+        <button onClick={()=>setCompModal(null)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:T.sub,lineHeight:1}}>×</button>
+      </div>
+      {modalTxs.length>0&&(
+        <div style={{padding:"8px 16px",borderBottom:"1px solid "+T.border,display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <input type="checkbox" checked={selIds.length===modalTxs.length} onChange={toggleAll} style={{width:16,height:16,cursor:"pointer"}}/>
+          <span style={{fontSize:12,color:T.sub,fontWeight:600}}>{selIds.length>0?selIds.length+" selecionado(s)":"Selecionar todos"}</span>
+        </div>
+      )}
+      <div style={{overflowY:"auto",flex:1,padding:"8px 0"}}>
+        {modalTxs.length===0&&<div style={{padding:20,textAlign:"center",color:T.sub,fontSize:13}}>Nenhum lançamento encontrado</div>}
+        {modalTxs.map((t,i)=>(
+          <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderTop:i>0?"1px solid "+T.border:"none",background:selected[t.id]?T.accentLt:"transparent"}}>
+            <input type="checkbox" checked={!!selected[t.id]} onChange={()=>toggleSel(t.id)} onClick={e=>e.stopPropagation()} style={{width:16,height:16,cursor:"pointer",flexShrink:0}}/>
+            <div onClick={()=>{setEditTx(t);setCompModal(null);}} style={{flex:1,minWidth:0,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</div>
+                <div style={{fontSize:11,color:T.sub,marginTop:1}}>{t.date}{t.parcela_atual?` · ${t.parcela_atual}/${t.total_parcelas}`:""}</div>
               </div>
-            ))}
+              <span style={{fontSize:14,fontWeight:700,fontFamily:M,flexShrink:0,color:t.type==="in"?T.green:T.red}}>{t.type==="in"?"+":"-"}R$ {fmt2(t.value)}</span>
+              <span style={{fontSize:13,color:T.sub,flexShrink:0}}>✏️</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      {selIds.length>0&&(
+        <div style={{padding:"12px 16px",borderTop:"1px solid "+T.border,flexShrink:0,background:T.accentLt}}>
+          <div style={{fontSize:11,fontWeight:700,color:T.sub,marginBottom:6}}>MOVER {selIds.length} ITEM(NS) PARA:</div>
+          <div style={{display:"flex",gap:8}}>
+            <select value={bulkCat} onChange={e=>setBulkCat(e.target.value)} style={{flex:1,padding:"9px 10px",border:"1.5px solid "+T.border,borderRadius:10,fontFamily:F,fontSize:13,outline:"none",background:"#fff"}}>
+              <option value="">Selecione categoria...</option>
+              {allCats.map(c=><option key={c} value={c}>{CATS[c]?.icon} {c}</option>)}
+            </select>
+            <button onClick={applyBulkCat} disabled={!bulkCat||bulkSaving} style={{padding:"9px 16px",background:bulkCat?T.accent:"#ccc",color:"#fff",border:"none",borderRadius:10,fontFamily:F,fontSize:13,fontWeight:700,cursor:bulkCat?"pointer":"default",whiteSpace:"nowrap"}}>{bulkSaving?"Salvando...":"Aplicar"}</button>
           </div>
         </div>
-      </div>);
-    })()}
+      )}
+    </div>
   </div>);
 }
 
@@ -1367,7 +1413,7 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
 
     </div>
 
-    {page==="comparar"&&<CompararPage txs={txs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB} compModal={compModal} setCompModal={setCompModal} setEditTx={setEditTx}/>}
+    {page==="comparar"&&<CompararPage txs={txs} setTxs={setTxs} compMesA={compMesA} setCompMesA={setCompMesA} compMesB={compMesB} setCompMesB={setCompMesB} compModal={compModal} setCompModal={setCompModal} setEditTx={setEditTx}/>}
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:20,boxShadow:"0 -4px 20px rgba(26,31,46,.1)"}}>
       {NAV.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,padding:"10px 4px 12px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:page===n.id?T.accent:T.sub,fontFamily:F}}><span style={{fontSize:20,lineHeight:1}}>{n.icon}</span><span style={{fontSize:9,fontWeight:page===n.id?700:500,letterSpacing:.1}}>{n.label}</span>{page===n.id&&<div style={{width:16,height:3,borderRadius:99,background:T.accent,marginTop:-2}}/>}</button>))}
     </div>
