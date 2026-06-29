@@ -238,6 +238,97 @@ async function aiCall(messages,system,maxTokens=800) {
   const data=await res.json();return data.content?.map(b=>b.text||"").join("")||null;
 }
 
+// ===== Finn IA Tools: real database access (query + write) =====
+const FINN_TOOLS=[
+  {
+    name:"buscar_transacoes",
+    description:"Busca transações no banco de dados por período, categoria, conta ou texto. Use para responder perguntas sobre gastos passados, qualquer mês, ou para encontrar uma transação específica antes de editá-la ou excluí-la.",
+    input_schema:{type:"object",properties:{
+      mes_inicio:{type:"string",description:"Mês inicial no formato YYYY-MM. Opcional."},
+      mes_fim:{type:"string",description:"Mês final no formato YYYY-MM. Opcional, padrão = mes_inicio."},
+      categoria:{type:"string",description:"Filtrar por categoria exata. Opcional."},
+      conta:{type:"string",description:"Filtrar por nome da conta. Opcional."},
+      busca_texto:{type:"string",description:"Buscar por texto na descrição. Opcional."},
+      tipo:{type:"string",enum:["in","out"],description:"Filtrar por entrada ou saída. Opcional."},
+      limite:{type:"number",description:"Máximo de resultados a retornar. Padrão 50."}
+    }}
+  },
+  {
+    name:"resumo_financeiro",
+    description:"Retorna totais de receitas, despesas e saldo de um período, com breakdown por categoria. Use para perguntas agregadas como 'quanto gastei em X' ou 'compare maio com junho'.",
+    input_schema:{type:"object",properties:{
+      mes_inicio:{type:"string",description:"Mês inicial YYYY-MM."},
+      mes_fim:{type:"string",description:"Mês final YYYY-MM. Padrão = mes_inicio."}
+    },required:["mes_inicio"]}
+  },
+  {
+    name:"editar_transacao",
+    description:"Edita uma transação existente. Use buscar_transacoes primeiro para obter o ID exato. SEMPRE confirme com o usuário antes de chamar esta função, a menos que o usuário já tenha sido explícito sobre qual transação e o que mudar.",
+    input_schema:{type:"object",properties:{
+      id:{type:"string",description:"ID da transação (UUID), obtido via buscar_transacoes."},
+      descricao:{type:"string"},
+      value:{type:"number",description:"Valor absoluto (sempre positivo, o sinal é definido por type)."},
+      cat:{type:"string",description:"Nova categoria."},
+      type:{type:"string",enum:["in","out"]},
+      date:{type:"string",description:"YYYY-MM-DD"},
+      conta:{type:"string"},
+      status:{type:"string",enum:["efetivado","pendente"]}
+    },required:["id"]}
+  },
+  {
+    name:"excluir_transacao",
+    description:"Exclui permanentemente uma transação. Use buscar_transacoes primeiro para confirmar o ID correto. SEMPRE confirme explicitamente com o usuário antes de excluir.",
+    input_schema:{type:"object",properties:{
+      id:{type:"string",description:"ID da transação (UUID) a excluir."}
+    },required:["id"]}
+  },
+  {
+    name:"criar_transacao",
+    description:"Cria uma nova transação no banco. Use quando o usuário pedir para registrar/lançar um gasto ou receita e a conta já estiver clara (mencionada pelo usuário ou confirmada).",
+    input_schema:{type:"object",properties:{
+      descricao:{type:"string"},
+      value:{type:"number",description:"Valor absoluto, sempre positivo."},
+      cat:{type:"string"},
+      type:{type:"string",enum:["in","out"]},
+      date:{type:"string",description:"YYYY-MM-DD"},
+      conta:{type:"string",description:"Nome exato da conta."},
+      status:{type:"string",enum:["efetivado","pendente"],description:"Padrão efetivado."}
+    },required:["descricao","value","cat","type","date","conta"]}
+  }
+];
+
+async function aiCallWithTools(messages,system,toolHandler,maxTokens=1500,maxRounds=6) {
+  const KEY=process.env.REACT_APP_ANTHROPIC_KEY;if(!KEY)return {text:null,toolLog:[]};
+  let convo=[...messages];
+  let toolLog=[];
+  for(let round=0;round<maxRounds;round++){
+    let res;
+    try{
+      res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:maxTokens,system,messages:convo,tools:FINN_TOOLS})});
+    }catch(e){return {text:"Erro de rede: "+e.message,toolLog};}
+    if(!res.ok){let msg="Erro da API ("+res.status+")";try{const eb=await res.json();msg+=": "+(eb?.error?.message||"");}catch{}return {text:msg,toolLog};}
+    const data=await res.json();
+    const blocks=data.content||[];
+    const textBlocks=blocks.filter(b=>b.type==="text").map(b=>b.text).join("");
+    const toolUses=blocks.filter(b=>b.type==="tool_use");
+    if(toolUses.length===0){
+      return {text:textBlocks,toolLog};
+    }
+    // Execute tool calls and feed results back
+    convo.push({role:"assistant",content:blocks});
+    const toolResults=[];
+    for(const tu of toolUses){
+      let result;
+      try{result=await toolHandler(tu.name,tu.input);}
+      catch(e){result={error:e.message};}
+      toolLog.push({name:tu.name,input:tu.input,result});
+      toolResults.push({type:"tool_result",tool_use_id:tu.id,content:JSON.stringify(result)});
+    }
+    convo.push({role:"user",content:toolResults});
+  }
+  return {text:"Atingi o limite de etapas processando sua solicitação. Pode reformular de forma mais específica?",toolLog};
+}
+
 async function categorizarComIA(transactions, rules=[]) {
   // Skip transfers and preserve installment info
   transactions = transactions.map(t => isTransfer(t.descricao)?{...t,cat:"Transferência",type:"transfer"}:t);
@@ -841,7 +932,7 @@ export default function App() {
   const [goals,setGoals]=useState(()=>{try{return JSON.parse(localStorage.getItem("finn_goals")||"{}")||DEFAULT_GOALS;}catch{return DEFAULT_GOALS;}});
   const [editGoals,setEditGoals]=useState(false);const [goalDraft,setGoalDraft]=useState({});
   const [chatLog,setChatLog]=useState([{role:"assistant",content:"Olá! Sou a Finn. Posso analisar gastos, registrar transações e gerar resumos.\n\nO que precisam?"}]);
-  const [chatIn,setChatIn]=useState("");const [chatBusy,setChatBusy]=useState(false);const [isListening,setIsListening]=useState(false);const [pendingTx,setPendingTx]=useState(null);
+  const [chatIn,setChatIn]=useState("");const [chatBusy,setChatBusy]=useState(false);const [isListening,setIsListening]=useState(false);
   const [form,setForm]=useState({descricao:"",value:"",cat:"Alimentação",type:"out",date:new Date().toISOString().slice(0,10),conta:"",data_compra:"",status:"efetivado"});
   const [importStep,setImportStep]=useState("idle");const [importFiles,setImportFiles]=useState([]);const [importAccount,setImportAccount]=useState("");const [importFaturaMes,setImportFaturaMes]=useState("");
   const [importPreview,setImportPreview]=useState([]);const [importFuturas,setImportFuturas]=useState([]);
@@ -1029,12 +1120,84 @@ const tCompra=t.data_compra||t.date;const exCompra=ex.data_compra||ex.date;const
   const addTx=async()=>{const v=parseFloat(form.value);if(!form.descricao||isNaN(v)||v<=0)return;setSavingTx(true);try{const isIncome=INCOME_CATS.includes(form.cat);await saveTx({date:form.date,data_compra:form.data_compra||null,descricao:form.descricao,cat:form.cat,value:isIncome?Math.abs(v):-Math.abs(v),type:isIncome?"in":"out",src:"manual",conta:form.conta,status:form.status,fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});setForm(f=>({...f,descricao:"",value:"",conta:"",data_compra:""}));}catch(e){console.error(e);}finally{setSavingTx(false);}};
 
   const contasAtivas=accounts.filter(a=>a.ativo);
-  const buildSystemPrompt=(today,income,expense,balance)=>{const contasList=contasAtivas.map(a=>a.nome).join(", ");const summary=filteredTxs.slice(0,25).map(t=>t.date+"|"+t.descricao+"|"+t.cat+"|R$"+Math.abs(Number(t.value)).toFixed(2)+"("+(t.type==="in"?"entrada":"saída")+")").join("\n");const alertas=[];EXPENSE_CATS.forEach(cat=>{const spent=filteredTxs.filter(t=>t.cat===cat&&t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);const meta=goals[cat]||0;if(meta>0&&spent>=meta*0.8)alertas.push(cat+": "+Math.round(spent/meta*100)+"% da meta");});let rb=0;buildProjection(txs,budget).forEach(p=>{rb+=p.totalRec-p.totalDesp;if(rb<0&&!p.isPast)alertas.push("Saldo negativo em "+p.label);});const alertaStr=alertas.length>0?"\n\u26a0\ufe0f Alertas: "+alertas.join(", "):"";const budgCtx=budget.length>0?"\nOr\u00e7amento carregado ("+budget.length+" linhas).":"";return "Voc\u00ea \u00e9 a Finn, assistente financeira de um casal. Hoje \u00e9 "+today+". Seja concisa e amig\u00e1vel.\nPer\u00edodo: "+selMonth+" | Receitas: R$"+income.toFixed(2)+" | Despesas: R$"+expense.toFixed(2)+" | Saldo: R$"+balance.toFixed(2)+alertaStr+budgCtx+"\nContas dispon\u00edveis: "+contasList+"\nTransa\u00e7\u00f5es:\n"+summary+"\nSe o usu\u00e1rio mencionar a conta, inclua em \"conta\" o nome exato. Se n\u00e3o mencionar, deixe conta vazio e o sistema perguntar\u00e1.\nFormato de registro: <<<{\"descricao\":\"...\",\"value\":0,\"cat\":\"...\",\"type\":\"in|out\",\"date\":\"YYYY-MM-DD\",\"conta\":\"nome exato ou vazio\"}>>>>>;";};
-  const processTxJson=async(o,afterMsg)=>{const v=parseFloat(o.value)||0;const normStr=s=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();const contaNorm=normStr(o.conta||"");const qwords=contaNorm.split(" ").filter(w=>w.length>1);const contaMatch=contaNorm?(contasAtivas.find(a=>normStr(a.nome)===contaNorm)||contasAtivas.find(a=>normStr(a.nome).includes(contaNorm))||contasAtivas.find(a=>qwords.every(w=>normStr(a.nome).includes(w)))||contasAtivas.find(a=>normStr(a.nome).split(" ").filter(w=>w.length>2).some(w=>contaNorm.includes(w)))||contasAtivas.find(a=>qwords.some(w=>w.length>1&&normStr(a.nome).includes(w)))):null;if(!contaMatch){const opts=contasAtivas.map((a,i)=>(i+1)+". "+a.nome).join("\n");setPendingTx({...o,value:v});setChatLog(p=>[...p,{role:"assistant",content:"Em qual conta devo registrar?\n"+opts}]);return false;}await saveTx({date:o.date||new Date().toISOString().slice(0,10),descricao:o.descricao||"Transa\u00e7\u00e3o",cat:o.cat||"Outros",value:o.type==="out"?-v:v,type:o.type||"out",src:"manual",conta:contaMatch.nome,status:"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});if(afterMsg)setChatLog(p=>[...p,{role:"assistant",content:"\u2705 Registrado em "+contaMatch.nome+"!"}]);return true;};
-  const handlePendingTxChoice=async(msg)=>{if(!pendingTx)return false;const m=msg.trim().toLowerCase();const found=contasAtivas.find(a=>a.nome.toLowerCase().includes(m)||m.includes(a.nome.toLowerCase()))||contasAtivas[parseInt(m)-1];if(found){const v=pendingTx.value||0;await saveTx({date:pendingTx.date||new Date().toISOString().slice(0,10),descricao:pendingTx.descricao||"Transa\u00e7\u00e3o",cat:pendingTx.cat||"Outros",value:pendingTx.type==="out"?-v:v,type:pendingTx.type||"out",src:"manual",conta:found.nome,status:"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""});setChatLog(p=>[...p,{role:"assistant",content:"\u2705 Registrado em "+found.nome+"!"}]);setPendingTx(null);return true;}setChatLog(p=>[...p,{role:"assistant",content:"N\u00e3o reconheci essa conta. Tente o n\u00famero ou nome exato."}]);return true;};
-  const toggleMic=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Use o Chrome.");return;}if(isListening){recognitionRef.current?.stop();setIsListening(false);return;}const rec=new SR();rec.lang="pt-BR";rec.continuous=false;rec.interimResults=false;rec.onstart=()=>setIsListening(true);rec.onend=()=>setIsListening(false);rec.onerror=()=>setIsListening(false);rec.onresult=(e)=>{const t=e.results[0][0].transcript;const history=[...chatLog,{role:"user",content:t}];setChatLog(history);setChatBusy(true);const today=new Date().toLocaleDateString("pt-BR");const system=buildSystemPrompt(today,income,expense,balance);aiCall(history.map(m=>({role:m.role,content:m.content})),system).then(async reply=>{let r=reply||"IA n\u00e3o dispon\u00edvel.";const jm=r.match(/<<<({.*?})>>>/s);if(jm){try{const o=JSON.parse(jm[1]);const saved=await processTxJson(o,true);if(saved)r=r.replace(/<<<{.*?}>>>/s,"").trim();else r="";}catch{}}const bm=r.match(/<<<BUDGET:(\[.*?\])>>>/s);if(bm){try{const ba=JSON.parse(bm[1]);await supabase.from("budget").delete().neq("id","00000000-0000-0000-0000-000000000000");const{data:bd}=await supabase.from("budget").insert(ba).select();if(bd)setBudget(bd);r=r.replace(/<<<BUDGET:.*?>>>/s,"").trim()+"\n\n\u2705 Or\u00e7amento atualizado com "+ba.length+" linhas.";}catch{}}if(r.trim())setChatLog(p=>[...p,{role:"assistant",content:r.trim()}]);setChatBusy(false);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});}).catch(()=>{setChatLog(p=>[...p,{role:"assistant",content:"Erro."}]);setChatBusy(false);});};recognitionRef.current=rec;rec.start();};
+  const normStr=s=>(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+  const matchConta=(nome)=>{const contaNorm=normStr(nome);if(!contaNorm)return null;const qwords=contaNorm.split(" ").filter(w=>w.length>1);return contasAtivas.find(a=>normStr(a.nome)===contaNorm)||contasAtivas.find(a=>normStr(a.nome).includes(contaNorm))||contasAtivas.find(a=>qwords.every(w=>normStr(a.nome).includes(w)))||contasAtivas.find(a=>normStr(a.nome).split(" ").filter(w=>w.length>2).some(w=>contaNorm.includes(w)))||null;};
 
-  const sendChat=async()=>{const msg=chatIn.trim();if(!msg||chatBusy)return;if(pendingTx){setChatLog(p=>[...p,{role:"user",content:msg}]);setChatIn("");await handlePendingTxChoice(msg);return;}const history=[...chatLog,{role:"user",content:msg}];setChatLog(history);setChatIn("");setChatBusy(true);supabase.from("chat_history").insert([{user_id:session.user.id,role:"user",content:msg}]).then(()=>{});const today=new Date().toLocaleDateString("pt-BR");const system=buildSystemPrompt(today,income,expense,balance);try{const reply=await aiCall(history.map(m=>({role:m.role,content:m.content})),system)||"Finn IA n\u00e3o est\u00e1 ativa.";let r=reply;const jm=r.match(/<<<({.*?})>>>/s);if(jm){try{const o=JSON.parse(jm[1]);const saved=await processTxJson(o,true);if(saved)r=r.replace(/<<<{.*?}>>>/s,"").trim();else r="";}catch{}}const bm=r.match(/<<<BUDGET:(\[.*?\])>>>/s);if(bm){try{const ba=JSON.parse(bm[1]);await supabase.from("budget").delete().neq("id","00000000-0000-0000-0000-000000000000");const{data:bd}=await supabase.from("budget").insert(ba).select();if(bd)setBudget(bd);r=r.replace(/<<<BUDGET:.*?>>>/s,"").trim()+"\n\n\u2705 Or\u00e7amento atualizado com "+ba.length+" linhas.";}catch{}}if(r.trim())setChatLog(p=>[...p,{role:"assistant",content:r.trim()}]);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:r}]).then(()=>{});}catch{setChatLog(p=>[...p,{role:"assistant",content:"Erro de conex\u00e3o."}]);}setChatBusy(false);};
+  const buildSystemPrompt=(today)=>{const contasList=contasAtivas.map(a=>a.nome).join(", ");const allCatsList=Object.keys(CATS).join(", ");return "Você é a Finn, assistente financeira de um casal (Raphael e Julia), com acesso real ao banco de dados via ferramentas.\nHoje é "+today+". Mês atualmente visualizado no app: "+selMonth+".\nSeja concisa, amigável, e use emojis com moderação.\n\nContas disponíveis: "+contasList+"\nCategorias disponíveis: "+allCatsList+"\n\nREGRAS IMPORTANTES:\n- Use buscar_transacoes ou resumo_financeiro para QUALQUER pergunta sobre dados — nunca invente números, sempre consulte primeiro.\n- Para editar ou excluir, busque a transação primeiro para confirmar o ID e os dados corretos. Mostre ao usuário o que vai mudar ANTES de executar, e só execute após confirmação explícita (ex: 'sim', 'pode', 'confirma'), EXCETO quando o pedido já for muito específico e inequívoco.\n- Para criar uma transação, se o usuário não mencionar a conta, pergunte antes de chamar criar_transacao.\n- value é sempre positivo nas ferramentas; o sinal é definido pelo campo type.\n- Categorias neutras (Transferência, Pgto Cartão, Estorno/Crédito) podem ser in ou out dependendo do contexto.\n- Ao final de uma operação de escrita, confirme em poucas palavras o que foi feito.";};
+
+  const finnToolHandler=async(name,input)=>{
+    if(name==="buscar_transacoes"){
+      let q=supabase.from("transactions").select("id,date,data_compra,descricao,cat,value,type,conta,status,parcela_atual,total_parcelas,fatura_mes");
+      const mi=input.mes_inicio,mf=input.mes_fim||input.mes_inicio;
+      if(mi)q=q.gte("date",mi+"-01");
+      if(mf){const[y,m]=mf.split("-").map(Number);const last=new Date(y,m,0).getDate();q=q.lte("date",mf+"-"+String(last).padStart(2,"0"));}
+      if(input.categoria)q=q.eq("cat",input.categoria);
+      if(input.conta){const cm=matchConta(input.conta);if(cm)q=q.eq("conta",cm.nome);}
+      if(input.tipo)q=q.eq("type",input.tipo);
+      if(input.busca_texto)q=q.ilike("descricao","%"+input.busca_texto+"%");
+      q=q.order("date",{ascending:false}).limit(input.limite||50);
+      const{data,error}=await q;
+      if(error)return{error:error.message};
+      return{count:data.length,transacoes:data};
+    }
+    if(name==="resumo_financeiro"){
+      const mi=input.mes_inicio,mf=input.mes_fim||input.mes_inicio;
+      const[y1,m1]=mi.split("-").map(Number);const[y2,m2]=mf.split("-").map(Number);
+      const last=new Date(y2,m2,0).getDate();
+      const{data,error}=await supabase.from("transactions").select("cat,value,type,date").gte("date",mi+"-01").lte("date",mf+"-"+String(last).padStart(2,"0"));
+      if(error)return{error:error.message};
+      const TRANSF=["Transferência","Pgto Cartão"];
+      const real=data.filter(t=>!TRANSF.includes(t.cat));
+      const totalRec=real.filter(t=>t.type==="in").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+      const totalDesp=real.filter(t=>t.type==="out").reduce((a,t)=>a+Math.abs(Number(t.value)),0);
+      const porCategoria={};
+      real.forEach(t=>{const k=t.cat;porCategoria[k]=porCategoria[k]||{total:0,tipo:t.type};porCategoria[k].total+=Math.abs(Number(t.value));});
+      return{periodo:mi+" a "+mf,total_receitas:totalRec,total_despesas:totalDesp,saldo:totalRec-totalDesp,por_categoria:porCategoria,qtd_transacoes:data.length};
+    }
+    if(name==="editar_transacao"){
+      const upd={};
+      if(input.descricao!=null)upd.descricao=input.descricao;
+      if(input.cat!=null)upd.cat=input.cat;
+      if(input.type!=null)upd.type=input.type;
+      if(input.date!=null)upd.date=input.date;
+      if(input.status!=null)upd.status=input.status;
+      if(input.conta!=null){const cm=matchConta(input.conta);upd.conta=cm?cm.nome:input.conta;}
+      if(input.value!=null){const v=Math.abs(Number(input.value));const tp=input.type||(await supabase.from("transactions").select("type").eq("id",input.id).single()).data?.type;upd.value=tp==="out"?-v:v;}
+      const{data,error}=await supabase.from("transactions").update(upd).eq("id",input.id).select().single();
+      if(error)return{error:error.message};
+      setTxs(p=>p.map(t=>t.id===input.id?data:t));
+      return{success:true,transacao:data};
+    }
+    if(name==="excluir_transacao"){
+      const{data:existing}=await supabase.from("transactions").select("*").eq("id",input.id).single();
+      const{error}=await supabase.from("transactions").delete().eq("id",input.id);
+      if(error)return{error:error.message};
+      setTxs(p=>p.filter(t=>t.id!==input.id));
+      return{success:true,excluida:existing};
+    }
+    if(name==="criar_transacao"){
+      const cm=matchConta(input.conta);
+      if(!cm)return{error:"Conta não encontrada: "+input.conta+". Contas disponíveis: "+contasAtivas.map(a=>a.nome).join(", ")};
+      const v=Math.abs(Number(input.value));
+      const novaTx={date:input.date,data_compra:input.date,descricao:input.descricao,cat:input.cat,value:input.type==="out"?-v:v,type:input.type,src:"manual",conta:cm.nome,status:input.status||"efetivado",fatura_mes:"",parcela_atual:null,total_parcelas:null,grupo_parcela:""};
+      const{data,error}=await supabase.from("transactions").insert([novaTx]).select().single();
+      if(error)return{error:error.message};
+      setTxs(p=>[data,...p]);
+      return{success:true,transacao:data};
+    }
+    return{error:"Ferramenta desconhecida: "+name};
+  };
+
+  const runFinnChat=async(history)=>{
+    const today=new Date().toLocaleDateString("pt-BR");
+    const system=buildSystemPrompt(today);
+    const{text,toolLog}=await aiCallWithTools(history.map(m=>({role:m.role,content:m.content})),system,finnToolHandler);
+    return{text:text||"Finn IA não está ativa.",toolLog};
+  };
+
+  const toggleMic=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Use o Chrome.");return;}if(isListening){recognitionRef.current?.stop();setIsListening(false);return;}const rec=new SR();rec.lang="pt-BR";rec.continuous=false;rec.interimResults=false;rec.onstart=()=>setIsListening(true);rec.onend=()=>setIsListening(false);rec.onerror=()=>setIsListening(false);rec.onresult=(e)=>{const t=e.results[0][0].transcript;const history=[...chatLog,{role:"user",content:t}];setChatLog(history);setChatBusy(true);runFinnChat(history).then(({text})=>{if(text.trim())setChatLog(p=>[...p,{role:"assistant",content:text.trim()}]);setChatBusy(false);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:text}]).then(()=>{});}).catch(()=>{setChatLog(p=>[...p,{role:"assistant",content:"Erro."}]);setChatBusy(false);});};recognitionRef.current=rec;rec.start();};
+
+  const sendChat=async()=>{const msg=chatIn.trim();if(!msg||chatBusy)return;const history=[...chatLog,{role:"user",content:msg}];setChatLog(history);setChatIn("");setChatBusy(true);supabase.from("chat_history").insert([{user_id:session.user.id,role:"user",content:msg}]).then(()=>{});try{const{text}=await runFinnChat(history);if(text.trim())setChatLog(p=>[...p,{role:"assistant",content:text.trim()}]);supabase.from("chat_history").insert([{user_id:session.user.id,role:"assistant",content:text}]).then(()=>{});}catch(e){setChatLog(p=>[...p,{role:"assistant",content:"Erro de conexão: "+e.message}]);}setChatBusy(false);};
 
   const saveGoals=()=>{const merged={...goals,...goalDraft};setGoals(merged);try{localStorage.setItem("finn_goals",JSON.stringify(merged));}catch{}setEditGoals(false);setGoalDraft({});};
 
